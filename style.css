@@ -1,0 +1,1081 @@
+:root {
+  --green: #1d9e75;
+  --green-d: #0f6e56;
+  --bg: #f3f5f4;
+  --card: #ffffff;
+  --text: #1c1c1a;
+  --muted: #6b6f6c;
+  --line: #e2e6e4;
+  --amber: #ef9f27;
+  --danger: #e24b4a;
+  /* topbar 是 sticky 的，统计页的分区导航要正好贴在它下沿 ——
+     两处都得知道这个高度，写成变量免得改了 padding 就错位。 */
+  --topbar-h: 54px;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* hidden 属性必须真隐藏。
+   .cropper / .banner 都设了 display:flex，作者样式会盖掉 UA 的
+   [hidden]{display:none}，导致"隐藏"的元素照样显示出来。 */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--green);
+  color: #fff;
+  padding: 14px 16px;
+  padding-top: calc(14px + env(safe-area-inset-top));
+  z-index: 10;
+}
+.topbar h1 { margin: 0; font-size: 17px; font-weight: 600; }
+.ver { font-size: 11px; font-weight: 400; opacity: .8; }
+
+main { padding: 12px; padding-bottom: 80px; }
+
+.view { display: none; }
+.view.active { display: block; }
+
+.card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+
+.field { display: block; margin-bottom: 14px; }
+.field > span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.field input, .field select, .field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 15px;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+}
+.field textarea { resize: vertical; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  outline: none;
+  border-color: var(--green);
+}
+.row { display: flex; gap: 10px; }
+.row .field { flex: 1; }
+.dash { align-self: center; color: var(--muted); }
+
+/* 历史选项标签：替代原生 <datalist>。
+   原生 datalist 在 Android WebView 里是贴着输入法的浮层，会挡住键盘；
+   页内标签完全不经过原生控件。注意 .sugg 用了 display:flex，
+   靠全局的 [hidden]{display:none !important} 才藏得住，别再覆盖它。 */
+.sugg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sug-chip {
+  padding: 5px 10px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--green-d);
+  /* 底色再淡一点在户外就看不出来了，边框保留足够对比才像"可以点的东西" */
+  background: #e4f4ee;
+  border: 1px solid #b9ded1;
+  border-radius: 999px;
+}
+.sug-chip:active { background: #d8eee7; }
+.sug-chip.on {
+  color: #fff;
+  background: var(--green);
+  border-color: var(--green);
+  font-weight: 600;
+}
+
+/* 「支持的消费方式」编辑器：已选标签 + 一行「输入框 + 添加」。
+   和上面的 .sugg 是两回事 —— .sugg 是「候选，点一下就填进去」，
+   这里是「已确定的值，点 × 才删得掉」，所以视觉上要更实、带一个明确的关闭钮。
+   .sup-list 用了 flex，藏它靠全局的 [hidden]{display:none !important}。 */
+.sup-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.sup-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
+  font-size: 12.5px;
+  line-height: 1.3;
+  color: var(--green-d);
+  background: #e4f4ee;
+  border: 1px solid #b9ded1;
+  border-radius: 999px;
+}
+.sup-x {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--green-d);
+  opacity: .7;
+}
+.sup-x:active { opacity: 1; }
+.sup-add { display: flex; gap: 8px; }
+.sup-add input { flex: 1; min-width: 0; }
+.sup-add .ghost { flex: 0 0 auto; padding: 10px 12px; font-size: 13px; }
+
+.upload {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  background: #fafbfa;
+  position: relative;
+}
+.upload img { width: 100%; max-height: 220px; border-radius: 8px; object-fit: contain; margin-bottom: 8px; }
+
+/* 真实可见但不可见的文件输入：有些 WebView 会忽略对 hidden / display:none 元素的 .click()。
+   这里保留布局占位并覆盖到整个上传区，点击即原生唤起选择器。 */
+.file-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 0;
+}
+.file-input::-webkit-file-upload-button { display: none; }
+
+button { cursor: pointer; font-family: inherit; }
+.primary {
+  width: 100%;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 13px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.row .primary { flex: 2; width: auto; }
+.primary:active { background: var(--green-d); }
+.ghost {
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--green-d);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+input[type="range"] { width: 100%; accent-color: var(--green); }
+
+.list { display: flex; flex-direction: column; gap: 12px; }
+.store {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.store-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.store-name { font-size: 16px; font-weight: 600; }
+.store-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* 小类卡片（生鲜 / 零食那半边）：和店铺卡片共用 .store 的骨架，
+   靠左侧一道蓝灰细边区分「这是按小类分的组，不是一家店」。
+   **刻意不用绿色** —— 绿色在本工程里已经是「店铺整体评价」的专属标识。 */
+.food-group { border-left: 3px solid #b6d3ec; }
+
+/* 一张小类卡片下可能挂着好几家店的整体评价，一条一段竖着排。
+   段间距由 gap 统一给，所以要把每一段自带的 margin-top 抹掉，
+   否则 6+8=14px 的缝会让它们看起来不属于同一张卡。 */
+.group-notes { display: flex; flex-direction: column; gap: 6px; }
+.group-notes > * { margin-top: 0; }
+
+/* 店铺评分 = 该店所有订单评分的算术平均，显示精确到 0.1 分 */
+.score { text-align: right; flex-shrink: 0; }
+.score b { display: block; font-size: 20px; line-height: 1.15; color: var(--amber); }
+.score .stars { display: block; font-size: 11px; letter-spacing: 0; }
+.score small { display: block; font-size: 11px; color: var(--muted); }
+
+.stats { display: flex; gap: 14px; margin: 10px 0; flex-wrap: wrap; }
+.stat { font-size: 13px; }
+.stat b { display: block; font-size: 16px; color: var(--green-d); }
+.stars { color: var(--amber); letter-spacing: 1px; }
+
+/* ---------- 份数 / 重量分开统计 ---------- */
+/* 口径不同（人均 / 每斤）的两个数不能并排比大小，所以按行分开摆，
+   每行前面一个彩色小标签标明是哪一桶。 */
+.stat-rows { display: flex; flex-direction: column; gap: 6px; margin-bottom: 2px; }
+.stat-row { display: flex; align-items: baseline; gap: 8px; }
+.stat-tag {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 0 7px;
+  border-radius: 999px;
+  /* 份数 = 绿系（沿用主题色），重量 = 琥珀系，颜色本身就是区分标识 */
+  color: var(--green-d);
+  background: #e4f4ee;
+  border: 1px solid #b9ded1;
+}
+.stat-tag.fen { color: var(--green-d); background: #e4f4ee; border-color: #b9ded1; }
+.stat-tag.jin { color: #8a5a00; background: #fdf2dd; border-color: #eed4a4; }
+/* 大类色标：餐饮 / 生鲜 / 零食。**刻意避开上面那套绿(份数)和琥珀(重量)** ——
+   两张卡的口径不是一回事，颜色撞了用户会当成同一套数字读。
+   生鲜用蓝、零食用紫，跟「吃 / 买食材 / 吃零嘴」的直觉也对得上。 */
+.stat-tag.cat-meal  { color: #1d6e52; background: #e0f2ea; border-color: #b3ddcb; }
+.stat-tag.cat-fresh { color: #1d6fb8; background: #e6f0fa; border-color: #b6d3ec; }
+.stat-tag.cat-snack { color: #833a8c; background: #f6eaf8; border-color: #dfbde4; }
+.stat-line { font-size: 12.5px; color: var(--muted); }
+
+/* 统计页的分桶卡片：一桶一行，行内是「数字+小标签」的小格 */
+.us-rows { display: flex; flex-direction: column; gap: 10px; }
+.us-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.us-nums { display: flex; gap: 14px; flex-wrap: wrap; }
+.us-cell b { font-size: 16px; color: var(--green-d); }
+.us-cell small { font-size: 11px; color: var(--muted); margin-left: 3px; }
+
+/* 「每斤均价」的实时回显，跟在斤数输入框下面 */
+.unit-out {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--green-d);
+  font-weight: 600;
+}
+
+/* 「综合评价」那一格：评分滑块和分值并排。滑块独占一行会把这一格拉得很长，
+   并排之后「综合评价」下面第一眼就是分值本身。 */
+.rate-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.rate-row input[type="range"] { flex: 1; }
+.rate-row b { font-size: 16px; color: var(--green-d); min-width: 14px; text-align: right; }
+.rate-suffix { font-size: 12px; color: var(--muted); }
+
+.reviews { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: none; }
+.reviews.open { display: block; }
+.review-item { padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.review-item:last-child { border-bottom: none; }
+.review-meta { color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+.review-text { color: var(--text); }
+.review-img { max-width: 100%; max-height: 160px; border-radius: 8px; margin-top: 6px; }
+
+/* 一家店的图可能有好几张（每次订单一张）。原来只渲染前 4 张、多的静默丢掉，
+   用户根本不知道还有图。现在全部渲染，改成横向滑动条：不换行，所以图片再多
+   也不会把卡片顶长。scroll-snap 让滑动停下时对齐到整张图，不会停在半张上。 */
+.dish-strip {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  padding-bottom: 4px;
+}
+.dish-strip img {
+  flex: 0 0 auto;   /* 不加会被 flex 压扁成一条线 */
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  scroll-snap-align: start;
+}
+/* 图片多到看不完时提醒一句，否则横向滑动条本身没有任何「还有更多」的暗示 */
+.dish-hint { font-size: 11px; color: var(--muted); margin: -2px 0 6px; }
+
+/* ---------- 店铺整体评价 ---------- */
+/* 挂在店铺层面，不属于任何单次订单，所以单独一张表存（storeMeta），
+   不塞进 orders —— 否则每次评价都要挑一条订单当宿主，删了订单评价也没了。 */
+.store-note {
+  background: #f6f8f7;
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+.store-note-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.store-note-label { font-size: 11px; color: var(--muted); }
+/* pre-wrap：备注里的换行要保住，否则用户分条写的几行会连成一坨 */
+.store-note-text { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.store-note-edit {
+  background: none;
+  border: none;
+  color: var(--green-d);
+  font-size: 12px;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.store-note-add {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  background: none;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--green-d);
+  font-size: 13px;
+  padding: 7px;
+}
+.store-note-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  background: #fff;
+  resize: vertical;
+}
+.store-note-input:focus { outline: none; border-color: var(--green); }
+.store-note-actions { display: flex; gap: 8px; margin-top: 8px; }
+.store-note-actions .ghost,
+.store-note-actions .primary { flex: 1; width: auto; padding: 9px; font-size: 14px; }
+
+/* 小类评价（v3.0.1）—— 它和「某个来源店铺的整体评价」会并排出现在同一张
+   小类卡片上，所以必须一眼分得出层次：小类那份是**卡片级**的（管整个小类、
+   全局共享），给琥珀色左边框 + 稍暖的底，和店铺那份的绿边区分开。 */
+.store-note.food {
+  background: #fdf7ec;
+  border-left-color: var(--amber);
+}
+.store-note.food .store-note-label { color: #a9701a; }
+.store-note-add.food {
+  border-style: solid;
+  border-color: var(--line);
+  color: #a9701a;
+}
+
+/* 必填星号的唯一用途：店名那一格的必填**随大类变**（餐饮必填 / 生鲜零食选填），
+   星号得能单独藏起来。所以它是个独立元素，不是写死在文案里的一个字。 */
+.req { color: var(--danger); }
+
+.toggle { background: none; border: none; color: var(--green-d); font-size: 13px; padding: 6px 0; }
+
+.review-actions { display: flex; gap: 8px; margin-top: 8px; }
+.review-actions button { font-size: 13px; padding: 5px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--green-d); }
+.review-actions button[data-del] { color: #d23b3b; border-color: #f0c4c4; }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 16px; font-size: 14px; }
+
+.tabbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  display: flex;
+  background: #fff;
+  border-top: 1px solid var(--line);
+  padding-bottom: env(safe-area-inset-bottom);
+  z-index: 10;
+}
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  padding: 12px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.tab.active { color: var(--green); font-weight: 600; }
+
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; }
+.toolbar .ghost { flex: 1; }
+.toolbar .sort-select {
+  flex: 1.25;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 8px;
+  font-size: 14px;
+  background: #fff;
+  color: var(--green-d);
+  font-family: inherit;
+}
+/* 筛选展开时按钮反色，一眼看出当前带着筛选条件在看 */
+#filter-toggle.on { background: var(--green); border-color: var(--green); color: #fff; }
+/* 「清除筛选」按内容宽度排，别跟着 .toolbar .ghost{flex:1} 被压成两行 */
+.toolbar #filter-clear { flex: 0 0 auto; padding: 10px 12px; font-size: 13px; white-space: nowrap; }
+
+.filter-panel {
+  margin-bottom: 12px;
+  /* 两列紧凑排布：原来 8 个字段竖着一路排下来，展开就是一大片。
+     均价区间和重置按钮加 .wide 独占整行。 */
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+.filter-panel .field { margin-bottom: 12px; min-width: 0; }
+.filter-panel .field.wide { grid-column: 1 / -1; }
+.filter-panel .field:last-of-type { margin-bottom: 10px; }
+.filter-panel .ghost.wide { grid-column: 1 / -1; }
+/* 「更多筛选」低频层：默认收起（靠全局 [hidden]{display:none !important}），
+   展开后**自成两列**、只占面板一小块 —— 不用 display:contents（新旧 WebView
+   行为不一致，踩过）。grid-column 让它横跨父级那两列。 */
+.filter-panel #more-toggle { margin-bottom: 10px; }
+#filter-more {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 10px;
+}
+/* 有已选条件时「更多筛选」反色，收起也一眼看到「里面还有筛选在生效」 */
+#more-toggle.on { background: var(--green); border-color: var(--green); color: #fff; }
+
+/* ---------- 订单页：汇总条 / 大类快捷条 / 已选条件 ---------- */
+/* 一行四个数，跟着当前筛选实时变。放在搜索框**上面** ——
+   它回答的是「现在这一屏是什么规模」，比控件更该第一眼看到。 */
+.sum-bar {
+  display: flex;
+  align-items: baseline;
+  padding: 10px 6px;
+  margin-bottom: 10px;
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.sum-item {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+.sum-item + .sum-item { border-left: 1px solid var(--line); }
+.sum-item b { font-size: 15px; color: var(--green-d); }
+.sum-item small { font-size: 11px; color: var(--muted); }
+
+/* 大类快捷条：跟筛选面板里的「大类」是同一个人，只是常驻可见、一键切换。
+   观感与统计页的分段器统一（共用 .seg / .seg-btn）。 */
+/* ---- 同款订单自动归组 ---- */
+/* 同款在**订单明细里**自动折成一块。刻意用虚线边框 + 淡底，和卡片里其它实线块
+   区分开：它表达的是一层「壳」（渲染时按 dupKeyOf 现算出来的分组），不是一份数据。 */
+.dup-block {
+  margin: 8px 0;
+  padding: 10px;
+  background: #fffdf7;
+  border: 1px dashed #f2dcb4;
+  border-radius: 10px;
+}
+.dup-block-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.dup-block-title { font-size: 13px; font-weight: 600; color: #8a5a12; }
+.dup-block-stat { font-size: 12px; color: #8a5a12; text-align: right; }
+/* 第二行：日期跨度 + 平均分。跨天时写「07/12 ~ 09/28」，
+   这正是「这款我什么时候点过」的速览。 */
+.dup-block-sub { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.dup-block-sub .stars { font-size: 12px; color: var(--amber); letter-spacing: -1px; }
+.dup-block-sub b { font-weight: 600; color: #8a5a12; }
+.dup-block-note {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  overflow-wrap: break-word;
+}
+/* 组内的明细行比平铺时缩一点，一眼看出它们是「归在一起的那几条」 */
+.dup-block-rows .review-item { padding-left: 8px; border-left: 2px solid #f2dcb4; }
+
+.cat-seg { margin-bottom: 10px; }
+.cat-seg .seg-btn { padding: 8px 10px; font-size: 13px; }
+
+/* 已选条件：一行可点掉的小标签。**面板收起来时它照样在** ——
+   解决「面板一收就忘了筛过什么、只看见列表莫名其妙变少」。 */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--green-d);
+  background: #e6f4ee;
+  border: 1px solid var(--green);
+  border-radius: 14px;
+}
+.chips .chip i { font-style: normal; font-size: 11px; opacity: .55; }
+/* 「清除全部」：和普通条件标签刻意区分开（虚线边框、无底色）——
+   它做的是一键清空，不是「撤掉某一维」。 */
+.chips .chip-clear { background: #fff; border-style: dashed; color: var(--muted); }
+
+/* 导入按钮：让 file input 真实覆盖在按钮上（同 .upload 的做法） */
+.import-wrap { position: relative; flex: 1; display: flex; }
+.import-wrap .ghost { flex: 1; width: 100%; }
+
+/* 备份文件去向的说明：导入时最容易卡在「选择器里找不到文件」 */
+.hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: -4px 2px 12px;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%);
+  background: rgba(28,28,26,.92);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+  z-index: 20;
+  /* 导出成功会带上具体路径，不给上限会撑出屏幕 */
+  max-width: 88vw;
+  text-align: center;
+  word-break: break-all;
+}
+.toast.show { opacity: 1; }
+
+.banner {
+  background: #fff8e6;
+  border: 1px solid #fac775;
+  color: #854f0b;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.link {
+  background: none;
+  border: none;
+  color: #854f0b;
+  text-decoration: underline;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+/* ---------- 图片裁剪器 ---------- */
+/* 内嵌在表单里，就地裁剪：选完图就在原位置展开，确定即完成上传，不跳转页面 */
+.cropper {
+  margin-top: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.crop-stage {
+  position: relative;
+  height: 44vh;
+  min-height: 200px;
+  max-height: 340px;
+  overflow: hidden;
+  background: #111;
+  touch-action: none;      /* 关掉浏览器手势，交给 pointer 事件自己处理 */
+}
+.crop-stage img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  max-width: none;         /* 关键：别让基础样式把原图压小 */
+  max-height: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;    /* 指针事件统一由 stage 接管 */
+}
+
+.crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  box-sizing: border-box;
+  /* 用超大外阴影当遮罩，无需额外 DOM；stage 的 overflow:hidden 会把它裁回框内 */
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.55);
+}
+/* 三分线辅助 */
+.crop-box::before,
+.crop-box::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+.crop-box::before {
+  top: 0; bottom: 0;
+  left: 33.333%; right: 33.333%;
+  border-left: 1px dashed rgba(255,255,255,.5);
+  border-right: 1px dashed rgba(255,255,255,.5);
+}
+.crop-box::after {
+  left: 0; right: 0;
+  top: 33.333%; bottom: 33.333%;
+  border-top: 1px dashed rgba(255,255,255,.5);
+  border-bottom: 1px dashed rgba(255,255,255,.5);
+}
+
+.crop-h {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid var(--green);
+  box-sizing: border-box;
+}
+.crop-h[data-h="nw"] { left: -14px; top: -14px; }
+.crop-h[data-h="ne"] { right: -14px; top: -14px; }
+.crop-h[data-h="sw"] { left: -14px; bottom: -14px; }
+.crop-h[data-h="se"] { right: -14px; bottom: -14px; }
+
+.crop-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.crop-zoom-row input[type="range"] { flex: 1; }
+
+.crop-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+.crop-tip { flex: 1; font-size: 12px; color: var(--muted); }
+.crop-bar .ghost {
+  font-size: 14px;
+  padding: 8px 16px;
+  flex-shrink: 0;
+}
+/* 「确定」是裁剪的唯一出口，做成实心主按钮，展开就能看见 */
+.crop-ok {
+  background: var(--green);
+  border: none;
+  color: #fff;
+  border-radius: 10px;
+  padding: 9px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.crop-ok:active { background: var(--green-d); }
+
+/* ---------- 关键词搜索 ---------- */
+.toolbar .search-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  color: var(--text);
+}
+.toolbar .search-input::placeholder { color: #9aa09c; }
+.toolbar .q-clear { flex: 0 0 auto; padding: 10px 12px; font-size: 13px; }
+
+/* ---------- 危险操作的二次确认态 ---------- */
+/* 第一次点击后按钮变成实心红，明确提示「再点一次才会真的执行」 */
+.arming {
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+}
+
+/* ---------- 可点开放的图片 ---------- */
+.zoomable { cursor: zoom-in; }
+
+/* ---------- 图片全屏查看 ---------- */
+/* 图集模式。内边距左右留出箭头的位置：不留的话箭头会盖在图片上，
+   横图尤其明显（图片铺满宽度，箭头正好压在内容两侧）。 */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0,0,0,.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 48px;
+}
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+/* 箭头整条高度都可点，指腹不用瞄准 */
+.lb-nav {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,.85);
+  font-size: 34px;
+  line-height: 1;
+  text-shadow: 0 1px 4px rgba(0,0,0,.6);
+}
+.lb-prev { left: 0; }
+.lb-next { right: 0; }
+.lb-nav:active { background: rgba(255,255,255,.12); }
+/* 压在白底图片上也必须看得见，所以自带深色胶囊底 */
+.lb-count {
+  position: absolute;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0,0,0,.55);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+
+/* ---------- 店铺操作行 ---------- */
+.store-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+.store-del {
+  background: none;
+  border: 1px solid #f0c4c4;
+  color: #d23b3b;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* ---------- 统计页 ---------- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.stat-card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 13px 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.stat-card b { display: block; font-size: 21px; line-height: 1.2; color: var(--green-d); }
+.stat-card span { font-size: 12px; color: var(--muted); }
+
+.stat-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.stat-head small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.big-num { font-size: 30px; font-weight: 600; color: var(--green-d); line-height: 1.15; }
+#view-stats .card { margin-bottom: 12px; }
+#view-stats .hint { margin: 6px 0 0; }
+
+/* 分区导航：吸顶贴在 topbar 下沿。topbar 自己 z-index:10 ——
+   这里必须更低，否则绿色的标题栏会被导航盖住。 */
+.stats-nav {
+  position: sticky;
+  top: calc(var(--topbar-h) + env(safe-area-inset-top));
+  z-index: 6;
+  display: flex;
+  gap: 6px;
+  padding: 8px 0;
+  margin: 0 0 10px;
+  background: var(--bg);
+}
+.stats-nav .seg-btn { padding: 7px 10px; font-size: 12px; }
+
+/* 四个分区容器（概览 / 店铺 / 时间 / 分布）。跳转落点要让开吸顶的两层
+   （topbar + 上面的分区导航），否则标题正好被压在导航底下 ——
+   scroll-margin-top 只对 scrollIntoView / 锚点跳转生效，手滚时不受影响。 */
+.sec { scroll-margin-top: calc(var(--topbar-h) + env(safe-area-inset-top) + 50px); }
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+  font-size: 12px;
+}
+.bar-row:last-child { margin-bottom: 0; }
+.bar-label {
+  flex: 0 0 76px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-track {
+  flex: 1;
+  height: 8px;
+  background: #eef1ef;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar-track i {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  border-radius: 4px;
+}
+.bar-val { flex: 0 0 auto; min-width: 46px; text-align: right; color: var(--text); }
+
+.empty.small { padding: 12px 0; }
+
+/* 纪录卡：4 个小格，把「哪家 / 哪天」的极值提到最前面 */
+.rec-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.rec-card {
+  background: #f6f8f7;
+  border-radius: 10px;
+  padding: 9px 10px;
+  min-width: 0;
+}
+.rec-card span { display: block; font-size: 11px; color: var(--muted); }
+.rec-card b {
+  display: block;
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--green-d);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rec-card small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 店铺排行：序号 + 店名 + 条形 + 右侧数值 */
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+.rank-row:last-child { margin-bottom: 0; }
+.rank-no {
+  flex: 0 0 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 5px;
+  background: #eef1ef;
+  color: var(--muted);
+  font-size: 11px;
+}
+.rank-no.top { background: var(--green); color: #fff; }
+.rank-main { flex: 1; min-width: 0; }
+.rank-name {
+  display: block;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-val { flex: 0 0 auto; min-width: 52px; text-align: right; color: var(--text); }
+
+/* 7 / 14 / 30 天 与 统计范围 共用的分段控件。
+   5 个按钮（全部/本月/上月/近3月/今年）在窄屏放不下时要能换行，否则会被压成看不清的小块 */
+.seg { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.seg-btn {
+  flex: 1 1 auto;
+  min-width: 56px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: #f1f4f2;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+.seg-btn.on {
+  background: #e6f4ee;
+  color: var(--green-d);
+  border-color: var(--green);
+  font-weight: 600;
+}
+
+/* ---------- 大类快捷条上的单量 ---------- */
+/* 按钮内部左右分开：左边名称、右边数字。名称长短不一（「全部」两个字 vs
+   「零食」两个字，但换别的字眼就不一定），并排居中会让数字左右横跳。 */
+.cat-seg .seg-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.seg-label { min-width: 0; }
+.seg-num {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  opacity: .7;
+}
+/* 选中那一档的数字跟着一起变亮，否则「餐饮 12」里的 12 看着像别人的 */
+.seg-btn.on .seg-num { color: var(--green-d); opacity: 1; }
+
+/* 每日明细：一天一行，同时给出单量和金额 */
+.day-row { margin-bottom: 10px; }
+.day-row:last-child { margin-bottom: 0; }
+.day-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.day-label { flex: 1; color: var(--muted); }
+.day-count { flex: 0 0 auto; color: var(--muted); }
+.day-amt { flex: 0 0 56px; text-align: right; font-weight: 600; }
+/* .bar-track 默认是给 flex 行用的 span，这里要独占一行 */
+.day-row .bar-track { display: block; }
+
+/* ---------- 危险区 ---------- */
+.danger-zone .stat-head { margin-bottom: 8px; }
+.danger-zone .hint { margin: 8px 0 0; }
+.danger {
+  width: 100%;
+  background: #fff;
+  border: 1px solid #f0c4c4;
+  color: var(--danger);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* ---------- 待点评（想吃清单） ---------- */
+/* 「心动度」三档胶囊。三档三色，沿用 .stat-tag 那套视觉语言（灰 / 琥珀 / 红），
+   和份数-重量、三个大类的标签色都不撞。
+   刻意不用星级：还没吃过的东西给不出「几分」，只能标「有多想吃」。 */
+.pri {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.pri.p1 { color: #6b6f6c; background: #f1f4f2; border-color: #dfe4e2; }
+.pri.p2 { color: #8a5a00; background: #fdf2dd; border-color: #eed4a4; }
+.pri.p3 { color: #b3352f; background: #fdeceb; border-color: #f3c9c6; }
+
+.wish {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+.wish-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.wish-name { font-size: 16px; font-weight: 600; }
+.wish-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* 「想吃」前缀 + 具体菜名。菜名允许换行，所以用 pre-wrap 保住用户敲的换行 */
+.wish-want { margin-top: 8px; font-size: 13.5px; line-height: 1.55; }
+.wish-want span { color: var(--green-d); font-weight: 600; margin-right: 5px; }
+/* 理由块沿用 .store-note 的视觉（左侧绿边 + 浅底），
+   让「用户自己写的长文本」在全 app 里长得一样 */
+.wish-reason {
+  background: #f6f8f7;
+  border-left: 3px solid var(--green);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wish-meta { font-size: 11.5px; color: var(--muted); margin-top: 8px; }
+.wish-actions { display: flex; gap: 8px; margin-top: 10px; }
+/* 「吃过了，去点评」是这一页唯一的终局动作，做成实心主按钮并占 2/3 宽，
+   和「删除」拉开主次；删除按钮用红描边，低调但一眼能认出来 */
+.wish-go {
+  flex: 2;
+  background: var(--green);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.wish-go:active { background: var(--green-d); }
+.wish-del {
+  flex: 1;
+  background: #fff;
+  border: 1px solid #f0c4c4;
+  color: #d23b3b;
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 14px;
+}
+.wish-del:disabled { opacity: 0.55; }
+
+/* 列表头：左边「N 家在等着去」，右边「共 N 家 · M 家超想吃」。
+   两行都在 head-row 里而不是塞进卡片 —— 卡片要能一眼扫过店名。 */
+.wish-head-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 2px 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.wish-head-row small { font-size: 12px; font-weight: 400; color: var(--muted); }
+
+/* 待点评表单底部的「取消 / 加入待点评」等分 */
+#wish-form .row .ghost,
+#wish-form .row .primary { flex: 1; }
+
+/* banner 里的「取消」会被长文案压成竖排单字 —— .banner 是 flex，
+   按钮默认参与收缩。待点评闭环那条 banner 里带着店名，长度不可控，
+   必须禁掉收缩。这条对所有 banner 都适用，别删。 */
+.banner .link { flex-shrink: 0; white-space: nowrap; }

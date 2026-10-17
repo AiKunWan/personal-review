@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1d9e75">
+  <title>个人点评</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>个人点评</h1>
+    <span class="ver">v3.2.0</span>
+  </header>
+
+  <main>
+    <!-- 添加订单 -->
+    <section id="view-add" class="view">
+      <div id="draft-banner" class="banner" hidden>
+        <span>有暂存草稿，已为你保留</span>
+        <button type="button" id="draft-clear" class="link">清除暂存</button>
+      </div>
+      <!-- 「吃过了，去点评」带过来的提示条：告诉用户这单保存后那条待点评会自动消失，
+           右边给一个「取消」（中途反悔，不想再从清单里删）。
+           刻意**另起一个元素**而不是复用上面那条草稿 banner —— 两条同时出现是
+           真实场景（先暂存了草稿，又从待点评转过来一单），复用一个会互相顶掉。 -->
+      <div id="wish-banner" class="banner" hidden>
+        <span id="wish-banner-text"></span>
+        <button type="button" id="wish-banner-cancel" class="link">取消</button>
+      </div>
+      <form id="order-form" class="card">
+        <!-- 购买日期 ｜ 地点：放在最前，都是「这单发生在什么时候、在哪」。
+             地点**不参与店铺身份**（v3.0.2 起）—— 同一家店换个地点不会裂成两张卡，
+             身份只看店名（见 app.js 的 storeKeyOf）。 -->
+        <div class="row">
+          <div class="field">
+            <span>购买日期</span>
+            <input type="date" id="orderDate">
+            <div class="sugg" id="sug-date"></div>
+          </div>
+          <div class="field">
+            <span>地点</span>
+            <input type="text" id="city" placeholder="如：哈尔滨（选填）" autocomplete="off">
+            <div class="sugg" id="sug-city" hidden></div>
+          </div>
+        </div>
+
+        <!-- 大类：餐饮 / 生鲜 / 零食。它决定三件事 ——
+             ① 计量方式的默认值（餐饮=份数，生鲜/零食=重量，**仍可手动改**：
+                有人按包买零食，锁死会让他录不进去）
+             ② 地点 / 平台 / 小类 三格的历史候选都整组换一份
+                （实际消费方式自 v3.0.2 起也回到这套历史候选里）
+             ③ 「小类评价」那格出不出现（只有非餐饮有「小类」这个分组维度）
+             数据库里存 category，中文值，导出的备份人能直接看懂；
+             老订单没有这个字段，一律按「餐饮」读（见 app.js 的 catOf，
+             和 unit 一样靠读取时兜底，不写迁移代码）。 -->
+        <div class="field">
+          <span>大类</span>
+          <div class="seg">
+            <button type="button" class="seg-btn on" data-cat="餐饮">餐饮</button>
+            <button type="button" class="seg-btn" data-cat="生鲜">生鲜</button>
+            <button type="button" class="seg-btn" data-cat="零食">零食</button>
+          </div>
+        </div>
+
+        <!-- 计量方式：份数 / 重量。两套口径不能混在一个数字里算 ——
+             份数比的是「人均」，重量比的是「每斤均价」。
+             数据库里用一个 unit 字段区分（'jin' = 重量），老订单没有这个字段，
+             一律当份数模式，所以老数据和旧备份原样能用（见 app.js 的 isJin）。
+             **必须排在大类后面**：上面那格会给一个默认值，反过来就成了
+             「先选手动值、再被大类覆盖」。 -->
+        <div class="field">
+          <span>计量方式</span>
+          <div class="seg">
+            <button type="button" class="seg-btn on" id="unit-fen" data-unit="fen">份数模式</button>
+            <button type="button" class="seg-btn" id="unit-jin" data-unit="jin">重量模式</button>
+          </div>
+        </div>
+
+        <!-- 「小类」由原「类型」改名而来（v2.7 那版叫「细分类」）。数据库里的键
+             **仍然是 foodType** —— 改 key 会让已经存在的订单和旧备份导入后全部
+             丢值，界面文案换掉就够了。
+             候选**只有当前大类的历史值**，一个常量标签都没有，想填什么都行。
+             v2.9 起预置词条全部取消（用户要求「只用历史记录」），所以
+             「第一次得手打、之后能点选」是预期行为，不是漏了预置。 -->
+        <div class="field">
+          <span>小类</span>
+          <input type="text" id="foodType" placeholder="自己填，填过就记住了" autocomplete="off">
+          <div class="sugg" id="sug-foodType" hidden></div>
+        </div>
+
+        <!-- 小类评价：和「店铺整体评价」同构的一段记录，但**归属对象是小类**。
+             只有非餐饮才有 —— 餐饮按店铺分组，小类不是分组维度，也就没有卡片挂它。
+             存法：storeMeta 表里键为 'food:' + 小类名，**和列表页的分组键是同一个值**
+             （groupOf 产出的就是它），所以卡片拿着 g.key 就能直接读写，不需要映射。
+             因此这是**按小类名全局共享**的一段文字：所有店铺共用，生鲜和零食也共用 ——
+             在录单页改了它，等于改了所有「苹果」的评价。
+             **即时保存**（失焦 / 切小类 / 提交订单时落库），刻意不做「随订单提交」：
+             列表页的小类卡片上也能改它，两处各存各的必然互相覆盖。
+             小类名为空、或大类是餐饮时整块收起（见 app.js 的 refreshFoodNote）。 -->
+        <div class="field" id="food-note-field" hidden>
+          <span>小类评价（可选）</span>
+          <textarea id="food-note" rows="3" placeholder="这个小类的整体印象：品质、价格、值不值得再买……"></textarea>
+        </div>
+
+        <label class="field">
+          <span>点的什么</span>
+          <textarea id="items" rows="2" placeholder="如：麦辣鸡腿堡x1、薯条x1、可乐x1"></textarea>
+        </label>
+
+        <div class="row">
+          <label class="field">
+            <span>总价（元）*</span>
+            <input type="number" id="totalPrice" min="0" step="0.01" placeholder="0.00" required>
+          </label>
+          <!-- 这一格在两种模式下是同一个输入框（数据库键也仍是 people），
+               只换标签和步进：份数是「用餐人数」，重量是「购买斤数」。
+               斤数必须允许小数 —— 沿用份数那边的 parseInt 会把 2.5 斤截成 2 斤。 -->
+          <label class="field">
+            <span id="people-label">用餐人数</span>
+            <input type="number" id="people" min="1" step="1" value="1">
+            <div class="unit-out" id="unit-out"></div>
+          </label>
+        </div>
+
+        <!-- 综合评价：评分和文字评价**合在一格**（v3.0.2 起）—— 两者说的是
+             同一件事（这单怎么样），分成两格反而要来回看。
+             数据库键仍是 rating / review。 -->
+        <div class="field">
+          <span>综合评价</span>
+          <div class="rate-row">
+            <!-- step 是 0.1 而不是 1：订单合并会产出 4.5 这种平均分，
+                 滑杆一旦是整档，回填时会被浏览器吸附到 4 或 5 ——
+                 用户点一下「保存修改」就把合并结果吃掉了。 -->
+            <input type="range" id="rating" min="1" max="5" step="0.1" value="5">
+            <b id="rating-val">5</b>
+            <span class="rate-suffix">分</span>
+          </div>
+          <textarea id="review" rows="3" placeholder="口味、分量、配送、性价比……"></textarea>
+        </div>
+
+        <!-- 实际消费方式（原「消费方式」）：**自由输入 + 页内历史候选**，
+             和地点 / 平台 / 小类同一套 —— v3.0.2 起它不再是从下拉里选。
+             候选里还会并进**这家店已记录的支持清单**（见 app.js 的 renderSuggestAll），
+             所以「这家店常怎么吃」照样一点就填。
+             数据库键仍然是 channel，改 key 会让已有订单和旧备份导入后丢值。 -->
+        <div class="field">
+          <span>实际消费方式 *</span>
+          <input type="text" id="channel-text" placeholder="如：仅外卖、堂食、自提…" autocomplete="off">
+          <div class="sugg" id="sug-channel-text" hidden></div>
+        </div>
+
+        <!-- 平台：**只在「实际消费方式」不是「线下」时才出现** ——
+             线下吃的单子没有平台可言。显隐由 app.js 的 applyFormMode 管。 -->
+        <div class="field" id="platform-field">
+          <span>平台</span>
+          <input type="text" id="platform" placeholder="如：美团、饿了么…" autocomplete="off">
+          <div class="sugg" id="sug-platform" hidden></div>
+        </div>
+
+        <!-- 店铺名称：**完全选填**（v3.0.2 起，餐饮也不再强制）——
+             填了才展开下面那格店铺属性；不填的单子照样能存，
+             只是列表页里没有「店铺」这层归属。
+             #store-req 那个星号恒隐藏，保留 id 供静态检查与将来恢复。 -->
+        <label class="field">
+          <span>店铺名称 <span class="req" id="store-req" hidden>*</span></span>
+          <input type="text" id="storeName" placeholder="如：麦当劳(中央大街店)（选填）">
+        </label>
+
+        <!-- 「支持的消费方式」：**店铺属性**，和店铺整体评价存在同一张表（storeMeta，
+             同一把 storeKey），所以删店时跟着一起删、导入导出也一并带上。
+             内容主要**从实际消费方式沉淀而来** —— 填过一次的值会自动进这份清单，
+             也可以在这里手动增删（v3.0.2 起的关系）。
+             交互是「输入框 + 添加按钮 + 已选标签」，不是原生多选：WebView 里
+             原生控件那套坑（见「实物图片」那段的注释）这里同样不碰。
+             整块随店名显隐 —— 属性挂在 storeKey 上，**没店名就没有载体**。
+             有店名时必填（一家店总得知道能怎么吃），见 app.js 的 applyFormMode。 -->
+        <div class="field" id="sup-field" hidden>
+          <span>支持的消费方式 *</span>
+          <div class="sup-edit">
+            <div class="sup-list" id="sup-channel-box"></div>
+            <div class="sup-add">
+              <input type="text" id="sup-channel-in" placeholder="如：仅外卖、外卖和堂食…" autocomplete="off">
+              <button type="button" id="sup-channel-add" class="ghost">＋ 添加</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 实物图片放最后（v3.0.2 起）：先把「吃了什么、花了多少、怎么样」填完，
+             图片是补充材料。就地裁剪器跟着一起待在这儿。
+             几个自由输入的格子（地点 / 平台 / 小类 / 实际消费方式）都用
+             「输入框 + 页内标签」而不是原生 <datalist>：后者在 Android WebView 里
+             会拉起一个原生下拉浮层压在输入法正上方，候选只剩一个时几乎必然挡住键盘。 -->
+        <div class="field">
+          <span>实物图片（可选）</span>
+          <div class="upload" id="upload-box-dish">
+            <img id="preview-dish" alt="预览" hidden>
+            <button type="button" id="pick-dish-btn" class="ghost">＋ 选择图片</button>
+            <input type="file" id="dish" accept="image/*" class="file-input">
+          </div>
+
+          <!-- 就地裁剪器：选完图直接在表单里裁，不跳转页面；
+               确定即把结果放进上面的预览框（等于完成上传） -->
+          <div id="cropper" class="cropper" hidden>
+            <div class="crop-stage" id="crop-stage">
+              <img id="crop-img" alt="">
+              <div class="crop-box" id="crop-box">
+                <i class="crop-h" data-h="nw"></i>
+                <i class="crop-h" data-h="ne"></i>
+                <i class="crop-h" data-h="sw"></i>
+                <i class="crop-h" data-h="se"></i>
+              </div>
+            </div>
+            <div class="crop-zoom-row">
+              <span>缩放</span>
+              <input type="range" id="crop-zoom" min="100" max="500" step="1" value="100">
+            </div>
+            <div class="crop-bar">
+              <button type="button" id="crop-cancel" class="ghost">取消</button>
+              <span class="crop-tip">拖动方框选保留区域</span>
+              <button type="button" id="crop-done" class="crop-ok">确定</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <button type="button" id="draft-save" class="ghost">暂存</button>
+          <button type="submit" class="primary" id="submit-btn">保存订单</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 待点评（想吃清单）：记「想尝但还没吃过」的店或商品。
+         它是录单流程的**上游** —— 攒一条 → 去吃 → 点「吃过了，去点评」预填订单
+         表单 → 保存后这条自动从清单消失，订单本身进了「店铺」页。
+         所以它紧挨着「添加」排在第 2 位，而店铺/统计是回头看的账本，靠后。
+         不并进店铺页做分段控件：待办清单和账本是两个心智模型，混在一页会让
+         搜索框和排序器各管一半，谁都不好用。
+         **这一段必须留在 order-form 之后** —— check_refs.py 的表单切片是靠
+         「第一个 </form>」定位的，跑到前面去会让字段顺序检查当场误报。 -->
+    <section id="view-wish" class="view">
+      <div class="toolbar">
+        <input type="search" id="wq" class="search-input" placeholder="搜店名 / 想吃的 / 理由" autocomplete="off">
+      </div>
+      <div class="toolbar">
+        <select id="w-sort" class="sort-select">
+          <option value="priority">按心动度</option>
+          <option value="created">按加入时间</option>
+        </select>
+        <button type="button" id="w-add" class="ghost">＋ 添加想吃的</button>
+      </div>
+
+      <!-- 添加表单：页内折叠（点上面的按钮展开），不占一个 tab。
+           字段只有订单表单的一半 —— 还没吃，所以没有图片/平台/价格/人数/评分/评价。
+           平台尤其是：还没下单的东西谈不上平台，转正录单时再填。
+           「店铺 / 商品名称」的必填**跟着大类走**：餐饮必填，生鲜/零食选填
+           （和订单表单同一条规矩），由 app.js 的 applyWishMode 动态开关。 -->
+      <form id="wish-form" class="card" hidden>
+        <label class="field">
+          <span>店铺 / 商品名称 <span class="req" id="w-req">*</span></span>
+          <input type="text" id="w-name" placeholder="如：老潼关肉夹馍">
+        </label>
+
+        <label class="field">
+          <span>地点</span>
+          <input type="text" id="w-city" placeholder="如：哈尔滨（选填）" autocomplete="off">
+          <div class="sugg" id="w-sug-city" hidden></div>
+        </label>
+
+        <!-- 大类只给默认值，不锁死：它决定「小类」那一格取哪一份历史值
+             （这里带历史候选的只有地点和小类两格，都按大类分桶，
+             见 app.js 的 histByCategory）。
+             和订单表单共用 CATEGORIES，不是另抄一份。 -->
+        <div class="field">
+          <span>大类</span>
+          <div class="seg">
+            <button type="button" class="seg-btn on" data-wcat="餐饮">餐饮</button>
+            <button type="button" class="seg-btn" data-wcat="生鲜">生鲜</button>
+            <button type="button" class="seg-btn" data-wcat="零食">零食</button>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>小类</span>
+          <input type="text" id="w-type" placeholder="自己填，填过就记住了" autocomplete="off">
+          <div class="sugg" id="w-sug-type" hidden></div>
+        </label>
+
+        <label class="field">
+          <span>想吃什么</span>
+          <textarea id="w-want" rows="2" placeholder="如：肉夹馍、凉皮（选填）"></textarea>
+        </label>
+
+        <label class="field">
+          <span>为什么想吃</span>
+          <input type="text" id="w-reason" placeholder="如：室友推荐 / 刷到视频 / 路过看到（选填）">
+        </label>
+
+        <!-- 心动度三档而不是星级：还没吃过的东西给不出「几分」，只能标「有多想吃」 -->
+        <div class="field">
+          <span>心动度</span>
+          <div class="seg">
+            <button type="button" class="seg-btn" data-wpri="1">有点想</button>
+            <button type="button" class="seg-btn on" data-wpri="2">想吃</button>
+            <button type="button" class="seg-btn" data-wpri="3">超想吃</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <button type="button" id="w-cancel" class="ghost">取消</button>
+          <button type="submit" class="primary">加入待点评</button>
+        </div>
+      </form>
+
+      <div class="wish-head-row">
+        <span id="w-count"></span>
+        <small id="w-extra"></small>
+      </div>
+      <div id="wish-list" class="list"></div>
+    </section>
+
+    <!-- 订单总览（筛选已并入本页，不再单开一个 tab）。
+         v3.0 起这一页的**分组维度按大类走**：餐饮的订单按店铺成组，
+         生鲜 / 零食的订单按小类成组 —— 买菜买零食时「从哪家店买的」几乎不重要，
+         「买的是什么」才是回头查账时想看的轴。两种卡片混排在同一列表里，
+         排序控件对两者统一生效（见 app.js 的 buildGroups）。
+         页面 id 仍叫 view-stores（内部标识不随界面文案改，这条规矩和
+         foodType 一样），但底部 tab 显示的是「订单」。 -->
+    <section id="view-stores" class="view active">
+      <!-- 汇总条：跟着当前筛选实时变。以前想只知道「一共多少单、花了多少」
+           得切到统计页去问，而统计页的口径（范围 / 大类）跟这里是两套。 -->
+      <div class="sum-bar">
+        <span class="sum-item"><b id="sum-total">¥0</b><small>合计</small></span>
+        <span class="sum-item"><b id="sum-count">0</b><small>单</small></span>
+        <span class="sum-item"><b id="sum-store">0</b><small>家店</small></span>
+        <span class="sum-item"><b id="sum-avg">¥0</b><small>均价</small></span>
+      </div>
+
+
+      <!-- 大类快捷条：常驻的四个分段按钮，默认「全部」。
+           它和筛选面板里的「大类」下拉是**同一个状态的两个入口** ——
+           两边任一改动都会把另一个同步过去（改的是 #f-cat 的 value，
+           过滤仍然只有 filterStores 一个出口）。 -->
+      <div class="seg cat-seg" id="cat-seg">
+        <button type="button" class="seg-btn on" data-cat=""><span class="seg-label">全部</span><b class="seg-num">0</b></button>
+        <button type="button" class="seg-btn" data-cat="餐饮"><span class="seg-label">餐饮</span><b class="seg-num">0</b></button>
+        <button type="button" class="seg-btn" data-cat="生鲜"><span class="seg-label">生鲜</span><b class="seg-num">0</b></button>
+        <button type="button" class="seg-btn" data-cat="零食"><span class="seg-label">零食</span><b class="seg-num">0</b></button>
+      </div>
+
+      <div class="toolbar">
+        <input type="search" id="q" class="search-input" placeholder="搜店名 / 菜品 / 评价 / 平台" autocomplete="off">
+        <button type="button" id="q-clear" class="ghost q-clear" hidden>清除</button>
+      </div>
+      <div class="toolbar">
+        <!-- 「筛选」按钮自带两处状态：#filter-n 是生效条数（0 条时 hidden），
+             后面那个 span 是开合箭头（▾ 收起 / ▴ 展开）。两处都由 renderFilterBar()
+             统一刷 —— 别用 textContent 整块覆盖，那会把里面的 <b> 冲掉。 -->
+        <button type="button" id="filter-toggle" class="ghost">筛选<b id="filter-n" hidden></b><span id="filter-caret"> ▾</span></button>
+        <select id="sort-key" class="sort-select">
+          <option value="rating">按评分</option>
+          <option value="avgPrice">按均价</option>
+          <option value="perCapita">按人均/每斤</option>
+          <option value="count">按订单数</option>
+          <option value="recent">按最近购买</option>
+        </select>
+        <button type="button" id="sort-dir" class="ghost" data-dir="desc">↓ 降序</button>
+        <!-- 一键撤销：有筛选条件时才出现。省掉「展开面板 → 找到重置 → 点」
+             那三步 —— 这也是「易撤销」要落到的那个点。 -->
+        <button type="button" id="filter-clear" class="ghost" hidden>清除筛选</button>
+      </div>
+
+      <!-- 已选条件：一行可点掉的小标签。**面板收起时它照样在** ——
+           解决「面板一收就忘了自己筛过什么、只看见列表莫名其妙变少」。
+           内容由 renderFilterChips() 生成，和面板、和大类快捷条同源。 -->
+      <div class="chips" id="filter-chips" hidden></div>
+
+      <!-- 筛选面板：默认收起，点「筛选」展开，就地过滤下面的订单列表。
+           v3.0 起「店铺 / 地点 / 平台 / 大类 / 小类」是**平级**的五个维度 ——
+           店铺不再天然是列表的顶层分组（生鲜/零食那半边按小类分组，压根没有
+           「店铺」这一层），所以它降级成一个普通筛选项，和其余四个并列。 -->
+      <div id="filter-panel" class="card filter-panel" hidden>
+        <!-- 默认层（常显）：月份 / 店铺 / 大类 / 小类 —— 两列正好两行，
+             都是「一进订单页就想点一下」的高频维度，一屏点到、不用再展开。 -->
+        <label class="field">
+          <span>月份</span>
+          <select id="f-month"><option value="">全部</option></select>
+        </label>
+        <label class="field">
+          <span>店铺</span>
+          <select id="f-store"><option value="">全部</option></select>
+        </label>
+        <!-- 大类筛选：候选固定是那三个（有数据的才列出来），
+             不像地点/小类那样从数据里自由现推 -->
+        <label class="field">
+          <span>大类</span>
+          <select id="f-cat"><option value="">全部</option></select>
+        </label>
+        <label class="field">
+          <span>小类</span>
+          <select id="f-food"><option value="">全部</option></select>
+        </label>
+        <!-- 低频层：地点 / 平台 / 实际消费方式 / 均价区间默认收起，点「更多筛选」才展开。
+             这样面板展开也只占 4+1 格，不再把整屏铺满（省空间）。
+             ⚠️ 切换必须**每次显式设 hidden**（applyFormMode 踩过的坑：只在形态切换时设，
+             hidden 就没人管了）；收起时靠 #more-toggle 的徽标提示「里面还有筛选在生效」。 -->
+        <button type="button" id="more-toggle" class="ghost wide">更多筛选 ▾</button>
+        <div id="filter-more" hidden>
+          <label class="field">
+            <span>地点</span>
+            <select id="f-city"><option value="">全部</option></select>
+          </label>
+          <label class="field">
+            <span>平台</span>
+            <select id="f-platform"><option value="">全部</option></select>
+          </label>
+          <!-- 实际消费方式（原「消费方式」）：候选由 fillFilterOptions 从实际数据里现推。
+               它不再写死那三个值，也不再是店铺级的 —— 筛的是「这一单实际是怎么吃的」，
+               所以同一家店出现的多个值都会列出来 -->
+          <label class="field">
+            <span>实际消费方式</span>
+            <select id="f-channel"><option value="">全部</option></select>
+          </label>
+          <label class="field wide">
+            <span>均价区间（元）</span>
+            <div class="row">
+              <input type="number" id="f-min" min="0" step="1" placeholder="最低">
+              <span class="dash">—</span>
+              <input type="number" id="f-max" min="0" step="1" placeholder="最高">
+            </div>
+          </label>
+        </div>
+        <button type="button" id="f-reset" class="ghost wide">重置筛选</button>
+      </div>
+
+      <div class="toolbar">
+        <button type="button" id="export-btn" class="ghost">导出备份</button>
+        <div class="import-wrap">
+          <button type="button" id="import-btn" class="ghost">导入备份</button>
+          <!-- 与上传框同一套加固：input 真实可见地盖在按钮上，
+               避免 WebView 忽略对 hidden / display:none 元素的程序化点击。
+               故意不写 accept：国产文件管理器常把 .json 认成 octet-stream，
+               用 application/json 过滤会让备份文件在列表里"看不见"。 -->
+          <input type="file" id="import-file" class="file-input">
+        </div>
+      </div>
+      <p class="hint">备份文件存在系统「下载」目录。导入时若只看到「最近」，在文件选择器里切到「下载」再选。</p>
+      <div id="store-list" class="list"></div>
+    </section>
+
+    <!-- 统计：数据已经在库里，这里只是把它读出来 -->
+    <section id="view-stats" class="view">
+      <!-- 分区导航：十几张卡一路堆下来有 4 屏高，想找「平台分布」只能滚。
+           吸顶 + 点击平滑跳转；四个锚点由 renderStats 铺在分区容器（.sec）上，
+           所以滚动位置的偏移也写在那层的 scroll-margin-top 里。 -->
+      <nav class="stats-nav" id="stats-nav">
+        <button type="button" class="seg-btn on" data-anchor="sec-overview">概览</button>
+        <button type="button" class="seg-btn" data-anchor="sec-store">店铺</button>
+        <button type="button" class="seg-btn" data-anchor="sec-time">时间</button>
+        <button type="button" class="seg-btn" data-anchor="sec-dist">分布</button>
+      </nav>
+      <div id="stats-body"></div>
+      <div class="card danger-zone">
+        <div class="stat-head"><span>危险操作</span><small>删了拿不回来</small></div>
+        <button type="button" id="clear-all" class="danger">清空全部数据</button>
+        <p class="hint">会删掉所有订单记录且无法撤销。执行前建议先到「店铺」页导出备份。</p>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar">
+    <button class="tab" data-view="add">＋ 添加</button>
+    <button class="tab" data-view="wish">待点评</button>
+    <button class="tab active" data-view="stores">订单</button>
+    <button class="tab" data-view="stats">统计</button>
+  </nav>
+
+  <!-- 图片全屏查看层：dataURL 都是本地内嵌图。
+       升级成图集模式：同一个店铺卡片里的图去重后组成一组，
+       箭头 / 左右横滑翻页，点空白处关闭。 -->
+  <div id="lightbox" class="lightbox" hidden>
+    <button type="button" id="lb-prev" class="lb-nav lb-prev" aria-label="上一张">‹</button>
+    <img id="lightbox-img" alt="">
+    <button type="button" id="lb-next" class="lb-nav lb-next" aria-label="下一张">›</button>
+    <div id="lb-count" class="lb-count"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# ===== 安全：签名密钥与本地配置绝不入库 =====
+*.keystore
+*.jks
+local.properties
+
+# ===== 构建产物 =====
+*.apk
+android-project/.gradle/
+android-project/.idea/
+android-project/app/build/
+
+# ===== assets 镜像（由 tools/sync_src.py 从根目录源码同步，不双份维护）=====
+android-project/app/src/main/assets/
+
+# ===== 工作区私有数据 =====
+.workbuddy/
+
+# ===== Python / 临时文件 =====
+__pycache__/
+*.pyc
+tmp_*
+*.log
+
+# ===== 预览与 UI 方案稿（过程产物，体积大）=====
+预览-*.png
+UI方案*.png
+_ui_*.html
+preview_*.html
+verify_report.txt

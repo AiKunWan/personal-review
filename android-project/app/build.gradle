@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.waimai.app'
+    compileSdk 34
+
+    /**
+     * 签名身份固定在工程内，不依赖 ~/.android/debug.keystore。
+     *
+     * 为什么要显式指定：Android 只允许「同 applicationId + 同签名密钥」的包覆盖安装。
+     * 用默认 debug 签名时，密钥在 C:\Users\<用户>\.android\ 下 —— 目录被清理、
+     * 换电脑、重装 Android Studio 都会让它被重新生成，**新密钥签名就与旧包不一致**，
+     * 系统直接报 INSTALL_FAILED_UPDATE_INCOMPATIBLE，只能先卸载（数据一起没）。
+     *
+     * 这里放的是标准 debug key 的副本，密钥材料完全相同，所以证书指纹不变，
+     * 已经装在手机上的旧版本依然能直接覆盖安装。把它随工程一起备份/迁移即可长期稳定。
+     */
+    signingConfigs {
+        stable {
+            storeFile file('keystore/waimai.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    defaultConfig {
+        applicationId "com.waimai.app"
+        minSdk 26
+        targetSdk 34
+
+        /**
+         * versionCode 必须**单调递增**：比已装版本小会被系统拒绝
+         * （INSTALL_FAILED_VERSION_DOWNGRADE），相同或更大才能覆盖安装。
+         * 命名规则固定为 major*10000 + minor*100 + patch，与 versionName 一一对应：
+         *   2.3 -> 20300    2.10 -> 21000    3.0 -> 30000
+         * 每次发版**两个都要改**，改完用 verify_apk.py 核对（它会把不匹配当 FAIL）。
+         */
+        versionCode 30200
+        versionName "3.2.0"
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.stable
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.stable
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    // WebViewAssetLoader：把 assets 映射成 https 虚拟域，使 IndexedDB 在 APK 内正常工作
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

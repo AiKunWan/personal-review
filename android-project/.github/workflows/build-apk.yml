@@ -1,0 +1,75 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept licenses & install SDK packages
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          which sdkmanager || echo "sdkmanager NOT in PATH"
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Point gradle to SDK
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          cat local.properties
+
+      - name: Install Gradle 8.9
+        run: |
+          curl -fsSL -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
+          unzip -q gradle.zip -d "$HOME/gradle_home"
+          echo "$HOME/gradle_home/gradle-8.9/bin" >> "$GITHUB_PATH"
+
+      - name: Build Debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace > build.log 2>&1
+
+      - name: Publish APK as Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag: apk-v${{ github.run_number }}
+          name: Waimai APK build ${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Diagnose (always)
+        if: always()
+        run: |
+          if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+            echo "BUILD OK, skip diag"
+            exit 0
+          fi
+          {
+            echo "=== ANDROID_HOME=$ANDROID_HOME ==="
+            echo "=== which sdkmanager: $(which sdkmanager || echo MISSING) ==="
+            echo "=== java ==="; java -version 2>&1
+            echo "=== gradle --version ==="; gradle --version 2>&1 || echo "NO GRADLE"
+            echo "=== build.log (tail 300) ==="; tail -300 build.log 2>/dev/null
+          } > ci-diag.txt
+          git config user.email "ci@local"
+          git config user.name "ci"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git add ci-diag.txt
+          git commit -m "ci-diag [skip ci]"
+          git push origin main

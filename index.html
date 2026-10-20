@@ -11,15 +11,24 @@
 <body>
   <header class="topbar">
     <h1>个人点评</h1>
-    <span class="ver">v3.2.0</span>
+    <span class="ver">v3.3.0</span>
   </header>
 
   <main>
     <!-- 添加订单 -->
     <section id="view-add" class="view">
+      <!-- 草稿箱恢复提示：**只在「当前表单内容来自草稿箱某一份」时显示**
+           （app.js 的 restoredDraftId 命中 —— 启动自动恢复 / 点「继续编辑」）。
+           「重新开始」只清表单和恢复状态，**不动草稿箱里的数据**：
+           那份还在箱里，随时能从面板再捞回来。
+           和下面的待点评 banner 是两个元素，别合并 —— 两条同时出现是
+           真实场景（先从草稿箱恢复了一单，又从待点评转过来一单）。 -->
       <div id="draft-banner" class="banner" hidden>
-        <span>有暂存草稿，已为你保留</span>
-        <button type="button" id="draft-clear" class="link">清除暂存</button>
+        <span>已恢复草稿箱里的一份，保存订单后自动移除</span>
+        <span class="banner-links">
+          <button type="button" id="draft-open" class="link">打开草稿箱</button>
+          <button type="button" id="draft-restart" class="link">重新开始</button>
+        </span>
       </div>
       <!-- 「吃过了，去点评」带过来的提示条：告诉用户这单保存后那条待点评会自动消失，
            右边给一个「取消」（中途反悔，不想再从清单里删）。
@@ -224,8 +233,17 @@
           </div>
         </div>
 
+        <!-- 底部按钮**排成两行**（v3.3.0）：360px 宽度下「暂存 / 草稿箱 /
+             保存订单」三个并排会挤爆，所以主按钮「保存订单」独占第二行
+             保持权重，第一行是两个次级操作。
+             「暂存」把当前表单存成草稿箱里**一份新草稿**（不再覆盖旧的）；
+             「草稿箱」打开管理面板，按钮上的 #draft-box-n 是份数角标，
+             0 份时整个收起（见 app.js 的 refreshDraftBoxUI）。 -->
         <div class="row">
           <button type="button" id="draft-save" class="ghost">暂存</button>
+          <button type="button" id="draft-box-btn" class="ghost">草稿箱<b id="draft-box-n" hidden></b></button>
+        </div>
+        <div class="row">
           <button type="submit" class="primary" id="submit-btn">保存订单</button>
         </div>
       </form>
@@ -484,6 +502,23 @@
     <img id="lightbox-img" alt="">
     <button type="button" id="lb-next" class="lb-nav lb-next" aria-label="下一张">›</button>
     <div id="lb-count" class="lb-count"></div>
+  </div>
+
+  <!-- 草稿箱（v3.3.0）：多份草稿的管理面板。fixed 遮罩 + 底部浅色卡片
+       （定位路子同 lightbox，但是白底 —— 这是要读内容的管理界面，不是看图的
+       沉浸层）。列表由 app.js 的 refreshDraftBoxUI 渲染，✕ / 点遮罩关闭。 -->
+  <div id="draft-box" class="draft-box" hidden>
+    <div class="draft-box-card">
+      <div class="draft-box-head">
+        <b class="draft-box-title">草稿箱</b>
+        <small id="draft-box-count" class="draft-box-count"></small>
+        <button type="button" id="draft-box-close" class="draft-box-close" aria-label="关闭">✕</button>
+      </div>
+      <div id="draft-box-list" class="draft-box-list"></div>
+      <div id="draft-box-foot" class="draft-box-foot" hidden>
+        <button type="button" id="draft-box-clear" class="ghost">清空草稿箱</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

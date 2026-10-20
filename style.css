@@ -581,6 +581,114 @@ input[type="range"] { width: 100%; accent-color: var(--green); }
   font-size: 13px;
   padding: 4px 6px;
 }
+/* banner 右侧的两个 link 横排：不包一层的话，space-between 会把它们拆到屏幕两边 */
+.banner-links { display: flex; gap: 2px; flex-shrink: 0; }
+
+/* ---------- 草稿箱（v3.3.0） ---------- */
+/* 多份草稿的管理面板：fixed 遮罩 + 底部浅色卡片。定位路子同 lightbox，
+   但是白底 —— 这是要读内容的管理界面，不是看图的沉浸层。 */
+.draft-box {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0,0,0,.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+.draft-box-card {
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--card);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  padding: 14px;
+}
+.draft-box-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.draft-box-title { font-size: 16px; font-weight: 600; }
+.draft-box-count { font-size: 12px; color: var(--muted); flex: 1; }
+.draft-box-close {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 6px 8px;
+}
+.draft-box-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 0;
+}
+.draft-box-foot { padding-top: 10px; border-top: 1px solid var(--line); }
+.draft-box-foot .ghost { width: 100%; }
+
+.draft-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+}
+.draft-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--bg);
+}
+.draft-main { flex: 1; min-width: 0; }
+.draft-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* 店名过长省略号，别把两个操作按钮挤出屏幕 */
+.draft-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draft-sum {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+  word-break: break-all;
+}
+.draft-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.draft-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.draft-actions .ghost { padding: 6px 10px; font-size: 12.5px; }
+.draft-del { color: var(--danger); border-color: #f0c4c4; }
+
+/* 「草稿箱」按钮上的份数角标：0 份时整个 <b> 带 hidden 收起，不留灰点 */
+#draft-box-n {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+}
+/* 表单底部两行按钮：第一行「暂存 / 草稿箱」对半，第二行主按钮独占 */
+#draft-save, #draft-box-btn { flex: 1; }
+#draft-box-btn { display: flex; align-items: center; justify-content: center; }
 
 /* ---------- 图片裁剪器 ---------- */
 /* 内嵌在表单里，就地裁剪：选完图就在原位置展开，确定即完成上传，不跳转页面 */

@@ -841,7 +841,20 @@ function toast(msg) {
 // ---------- 表单 ----------
 let pendingDishImage = null;
 let pendingEditOrder = null; // 编辑中的原订单，null 表示新增
-const DRAFT_KEY = 'waimai_draft';
+
+/**
+ * 草稿箱（v3.3.0）：替代原来**单槽位**的「暂存」。
+ *
+ * 为什么改：老实现一个键只存一份快照，再点「暂存」就覆盖 ——
+ * 而实际用法里「填到一半被叫走」会积下好几份，互相覆盖等于只能救回
+ * 最近一次，前面认真填掉的全丢失。所以升级成「一个键存数组 + 管理面板」。
+ *
+ * 老键 `waimai_draft` 里可能还躺着一份快照：只在**新键不存在**时迁进来
+ * 一次（见 migrateLegacyDraft），迁完即删，别让两份键长期共存 ——
+ * 否则「清空草稿箱」之后老键还阴着，下次启动又冒出一份。
+ */
+const DRAFT_BOX_KEY = 'waimai_draft_box';
+const DRAFT_LEGACY_KEY = 'waimai_draft';
 
 /**
  * 计量方式：份数 / 重量。
@@ -1060,6 +1073,10 @@ function writeForm(d) {
 function resetForm() {
   $('#order-form').reset();
   pendingDishImage = null; pendingEditOrder = null;
+  // 表单被整份清空 = 不再「来自草稿箱某一份」。不清 restoredDraftId 的话，
+  // 接下来保存订单会把那份草稿误删掉（防误删的关键一笔，见 restoredDraftId 注释）
+  restoredDraftId = null;
+  showDraftBanner(false);
   // 支持清单是**店铺级**的，跟着表单一起清干净：不清的话，上一条单子那家店的
   // 支持项会留在下一张空白表单里，看着像用户已经填过了。
   supChannels = []; supForKey = '';
@@ -1080,28 +1097,246 @@ function resetForm() {
   renderSuggestAll();
 }
 
-function hasDraft() {
-  try { return !!localStorage.getItem(DRAFT_KEY); } catch (e) { return false; }
-}
-function saveDraft() {
-  // 草稿里带着 base64 图片，而 localStorage 配额通常只有几 MB，**很容易超**。
-  // setItem 抛 QuotaExceededError 时原来会直接冒出去，
-  // 后面的横幅和 toast 都不执行 —— 表现就是「点了暂存草稿毫无反应」，连原因都看不到。
+// ---------- 草稿箱（v3.3.0） ----------
+// 数据形态：localStorage 一个键存 JSON 数组，每条 {id, savedAt, data}，
+// data 就是 readForm() 的结果，数组按 savedAt **降序**（最新在前）。
+// 刻意不新建 IndexedDB 表、不进备份格式 —— 草稿是「录单中途的存档」，
+// 只活在 localStorage 里，换机不跟着走正合适。
+
+/**
+ * 当前表单内容对应草稿箱里的哪一份（null = 不来自草稿箱）。
+ *
+ * 它是**防误删**的唯一依据：保存订单成功后要把「已经变成订单的那份草稿」
+ * 撤掉，靠的就是它指向的 id。写它的入口刻意只有两处 —— init 自动恢复
+ * 最新一份、「继续编辑」；而**任何整体替换表单内容的路径都必须清掉它**
+ * （resetForm / goReview / 编辑旧单入口）。漏清一次的后果：拿 A 店草稿的
+ * 表单去存 B 店的单，保存成功会把 A 那份草稿删掉，用户回头一看草稿没了。
+ */
+let restoredDraftId = null;
+
+/** 容错解析：坏 JSON / 非数组 / 条目缺 data 都当没有，别让一处损坏把功能锁死。 */
+function readDraftBox() {
+  let raw = null;
+  try { raw = localStorage.getItem(DRAFT_BOX_KEY); } catch (e) { return []; }
+  if (!raw) return [];
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(readForm()));
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((d) => d && typeof d === 'object' && d.data && typeof d.data === 'object')
+      .map((d) => ({
+        // 老数据 / 手改的备份可能缺 id，补一个：删除和「恢复状态」都按 id 认人
+        id: d.id != null ? String(d.id) : (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
+        savedAt: Number(d.savedAt) || 0,
+        data: d.data,
+      }))
+      .sort((a, b) => b.savedAt - a.savedAt);
+  } catch (e) { return []; }
+}
+
+/** 直接 setItem，**让 QuotaExceededError 抛给调用方** —— 草稿常带 base64
+ *  图片，而 localStorage 配额通常只有几 MB，超了该提示什么由调用方决定。 */
+function writeDraftBox(list) {
+  localStorage.setItem(DRAFT_BOX_KEY, JSON.stringify(list));
+}
+
+/**
+ * 老「暂存」键迁移：只在**新键不存在、老键还在**时发生一次。
+ * 把老快照原样包成一条草稿（savedAt 取此刻）写进新键，再删掉老键。
+ * 全程 try 兜底：JSON 坏了 / 配额超了都静默跳过 —— 迁移不成功也不该拦住启动。
+ */
+function migrateLegacyDraft() {
+  try {
+    if (localStorage.getItem(DRAFT_BOX_KEY) !== null) return;
+    const legacy = localStorage.getItem(DRAFT_LEGACY_KEY);
+    if (!legacy) return;
+    const data = JSON.parse(legacy);
+    if (!data || typeof data !== 'object') return;
+    writeDraftBox([{
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      savedAt: Date.now(),
+      data,
+    }]);
+    localStorage.removeItem(DRAFT_LEGACY_KEY);
+  } catch (e) { /* 迁移失败静默跳过：老键留着也不会致崩，下次启动还会再试 */ }
+}
+
+/** 表单是不是「什么都没填」。图片 / 人数 / 评分不算 —— 那几格都有默认值，
+ *  拿它们当判据的话「只摸了滑杆」也能暂存出一份空单来。 */
+function formIsEmpty() {
+  return !$('#storeName').value.trim() &&
+    !$('#foodType').value.trim() &&
+    !$('#items').value.trim() &&
+    !$('#review').value.trim() &&
+    !$('#totalPrice').value.trim() &&
+    !readChannel();
+}
+
+/** 「暂存」：把当前表单存成**一份新草稿**，不覆盖任何已有草稿。 */
+function saveDraft() {
+  if (formIsEmpty()) { toast('表单还是空的，没什么可暂存'); return; }
+  const box = readDraftBox();
+  box.push({
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+    savedAt: Date.now(),
+    data: readForm(),
+  });
+  // 最新在前：面板列表和「自动恢复最新一份」都指望这个顺序
+  box.sort((a, b) => b.savedAt - a.savedAt);
+  try {
+    writeDraftBox(box);
   } catch (e) {
+    // 配额是这里最容易触发的错（草稿带 base64 图）。原来它直接冒出去，
+    // 后面的 toast 一个都不执行，表现就是「点了暂存毫无反应」
     const quota = e && (e.name === 'QuotaExceededError' || e.code === 22);
     toast(quota ? '暂存失败：本地存储空间不足，去掉图片再试' : '暂存失败：' + (e && e.message ? e.message : '未知错误'));
     return;
   }
+  refreshDraftBoxUI();
+  toast('已存入草稿箱');
+}
+
+/**
+ * 把某份草稿从箱里撤掉。**找不到就静默返回 false** ——
+ * 保存订单成功后要调它，而用户完全可能中途已从面板里手动删过那份，
+ * 不能因此把「已保存」的提示搅黄（订单那边早就落库了）。
+ */
+function removeDraftById(id) {
+  if (!id) return false;
+  const box = readDraftBox();
+  const next = box.filter((d) => d.id !== id);
+  if (next.length === box.length) return false; // 本来就不在：no-op
+  try {
+    writeDraftBox(next);
+  } catch (e) {
+    return false; // 存储异常时当没删成，调用方各有兜底
+  }
+  refreshDraftBoxUI();
+  return true;
+}
+
+/** 保存时间的相对写法：今天 / 昨天 HH:mm，更早 MM-DD HH:mm。 */
+function draftSavedAtText(ts) {
+  const d = new Date(Number(ts) || Date.now());
+  const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  if (dayKey(ts) === dayKey(Date.now())) return '今天 ' + hm;
+  if (dayKey(ts) === dayKey(Date.now() - 86400000)) return '昨天 ' + hm;
+  return String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' + hm;
+}
+
+/** 长文本截断：草稿摘要里的「点的什么」经常是一长串，卡片上放不下。 */
+const clip = (s, n) => {
+  s = String(s == null ? '' : s);
+  return s.length > n ? s.slice(0, n) + '…' : s;
+};
+
+/**
+ * 一条草稿的卡片。**所有用户内容进 innerHTML 前都要过 esc** ——
+ * 列表整块重绘，店名 / 菜品 / 评价全是自由文本。
+ * 大类标色走 catCls()（唯一出口），别在这里另写一份 CATEGORIES.find。
+ */
+function draftItemHtml(d) {
+  const data = d.data || {};
+  // 标题回落链：店名 → 小类 → 「未命名店铺」（和订单分组同一个兜底词）
+  const name = (data.storeName || '').trim() || (data.foodType || '').trim() || '未命名店铺';
+  const cat = catOf(data);
+  const parts = [];
+  const items = clip((data.items || '').trim(), 20);
+  if (items) parts.push(esc(items));
+  const tp = parseFloat(data.totalPrice);
+  if (isFinite(tp)) parts.push('¥' + trimNum(tp));
+  // N人/N斤 按这份草稿自己的 unit 走（老草稿没 unit → 份数，见 isJin）
+  parts.push(esc(qtyText(data)));
+  return (
+    '<div class="draft-item">' +
+      (data.dishImage ? '<img class="draft-thumb" src="' + esc(data.dishImage) + '" alt="">' : '') +
+      '<div class="draft-main">' +
+        '<div class="draft-title">' +
+          '<span class="draft-name">' + esc(name) + '</span>' +
+          // 标色类**必须用插值模板写**，不能拿 class 属性拆成几段拼串 ——
+          // check_refs 的 class 检查按引号切片，拼串会被读出一串假类名
+          `<span class="stat-tag ${catCls(cat)}">${esc(cat)}</span>` +
+        '</div>' +
+        '<div class="draft-sum">' + parts.join(' · ') + '</div>' +
+        '<div class="draft-time">' + esc(draftSavedAtText(d.savedAt)) + '</div>' +
+      '</div>' +
+      '<div class="draft-actions">' +
+        '<button type="button" class="ghost" data-draft-edit="' + esc(d.id) + '">继续编辑</button>' +
+        '<button type="button" class="ghost draft-del" data-draft-del="' + esc(d.id) + '">删除</button>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+/** 角标 + 面板内容一起刷。面板关着也刷 —— 写的都是隐藏元素，下次打开就是新的。 */
+function refreshDraftBoxUI() {
+  const box = readDraftBox();
+  const badge = $('#draft-box-n');
+  if (badge) {
+    badge.textContent = box.length > 0 ? String(box.length) : '';
+    badge.hidden = box.length <= 0; // 0 份时收起，每次显式设
+  }
+  const count = $('#draft-box-count');
+  if (count) count.textContent = box.length ? '共 ' + box.length + ' 份' : '';
+  const list = $('#draft-box-list');
+  if (list) {
+    list.innerHTML = box.length
+      ? box.map(draftItemHtml).join('')
+      : '<div class="empty">草稿箱是空的<br>填单填到一半点「暂存」，就会存到这里</div>';
+  }
+  // 空箱没有可清的东西，footer 整个收起
+  const foot = $('#draft-box-foot');
+  if (foot) foot.hidden = !box.length;
+}
+
+function openDraftBox() {
+  refreshDraftBoxUI();
+  $('#draft-box').hidden = false;
+}
+function closeDraftBox() {
+  $('#draft-box').hidden = true;
+}
+
+/**
+ * 「继续编辑」：把那份草稿写回表单。
+ * 写完**必须记下 restoredDraftId** —— 它是保存订单时撤掉这份草稿的唯一依据。
+ */
+function continueDraft(id) {
+  const d = readDraftBox().find((x) => x.id === id);
+  if (!d) { toast('这份草稿已经不在了'); return; }
+  writeForm(d.data);
+  restoredDraftId = d.id;
+  closeDraftBox();
+  if (!$('#view-add').classList.contains('active')) switchView('add');
   showDraftBanner(true);
-  toast('已暂存草稿');
+  toast('已恢复这份草稿');
 }
-function clearDraft() {
-  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* 存储不可用时忽略 */ }
-  showDraftBanner(false);
+
+/** 面板里的点击委托：列表整块重绘，逐个绑监听会随旧节点一起丢（和统计页同一坑）。 */
+function onDraftBoxClick(e) {
+  const edit = e.target.closest('[data-draft-edit]');
+  if (edit) { continueDraft(edit.getAttribute('data-draft-edit')); return; }
+  const del = e.target.closest('[data-draft-del]');
+  if (del) {
+    const id = del.getAttribute('data-draft-del');
+    // 删除同样走 armConfirm 二次确认（和订单卡片上删一单同一个路子）。
+    // 禁用原生 confirm()：WebView 的 onJsConfirm 依赖宿主实现，被屏蔽时
+    // 整个删除逻辑会静默返回，表现为「点了没反应」
+    armConfirm(del, {
+      hint: '再点一次确认删除',
+      ask: '确认删除？',
+      busy: '删除中…',
+      done: '已删除',
+      run: () => { removeDraftById(id); return Promise.resolve(); },
+    });
+  }
 }
-function showDraftBanner(on) { $('#draft-banner').hidden = !on; }
+
+/** 恢复提示条：只在表单内容来自草稿箱某一份时显示。 */
+function showDraftBanner(on) {
+  const b = $('#draft-banner');
+  if (b) b.hidden = !on;
+}
 
 /**
  * 切换计量方式：按钮高亮 + 那一格的标签/输入约束 + 实时均价。
@@ -1830,7 +2065,31 @@ function bindForm() {
   });
 
   $('#draft-save').addEventListener('click', saveDraft);
-  $('#draft-clear').addEventListener('click', () => { clearDraft(); resetForm(); toast('已清除暂存'); });
+  $('#draft-box-btn').addEventListener('click', openDraftBox);
+  $('#draft-open').addEventListener('click', openDraftBox);
+  // 「重新开始」只丢表单和恢复状态，**不动草稿箱里的数据** —— 那份还在，
+  // 随时能从面板里再捞回来（这也是它和旧版「清除暂存」的本质区别）
+  $('#draft-restart').addEventListener('click', () => { resetForm(); toast('已重新开始'); });
+  $('#draft-box-close').addEventListener('click', closeDraftBox);
+  // 点遮罩关面板，点卡片内容不关（和 lightbox 一个路子）
+  $('#draft-box').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) closeDraftBox();
+  });
+  $('#draft-box-list').addEventListener('click', onDraftBoxClick);
+  $('#draft-box-clear').addEventListener('click', function () {
+    armConfirm(this, {
+      hint: '再点一次清空',
+      ask: '确认清空？',
+      busy: '清空中…',
+      done: '草稿箱已清空',
+      run: () => {
+        // removeItem 而不是写空数组：键直接不存在，读出来就是空箱
+        try { localStorage.removeItem(DRAFT_BOX_KEY); } catch (e) { /* 存储不可用时忽略 */ }
+        refreshDraftBoxUI();
+        return Promise.resolve();
+      },
+    });
+  });
 
   $('#order-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1923,7 +2182,10 @@ function bindForm() {
       return;
     }
     if (metaRow) storeMeta[storeKey] = metaRow;
-    clearDraft();
+    // 这份表单是从草稿箱恢复的：它已经变成订单，那份草稿该退了。
+    // 用户中途可能从面板里手动删过它 —— removeDraftById 对「本来就不在」
+    // 是静默 no-op，不能因此把已经保存成功的订单提示搅黄。
+    if (restoredDraftId) removeDraftById(restoredDraftId);
     resetForm();
     // 从「待点评」转正过来的单子：保存成功后**按 id 精确删**掉那条待点评。
     // 放在这里而不是 goReview 里：用户可能改了主意直接保存别的单子，
@@ -2984,6 +3246,10 @@ function onStoreListClick(e) {
     const o = _lastOrders.find((x) => x.id === id);
     if (o) {
       pendingEditOrder = o;
+      // 整张表单马上被换成旧订单的内容，恢复状态随之失效 —— 不清的话，
+      // 保存这份旧订单会把草稿箱里那份误删掉（防误删，见 restoredDraftId）
+      restoredDraftId = null;
+      showDraftBanner(false);
       writeForm(o);
       const sb = $('#submit-btn'); if (sb) sb.textContent = '保存修改';
       switchView('add');
@@ -4042,8 +4308,18 @@ async function refreshAll() {
     if (chip) applySugChip(chip);
   });
 
-  if (hasDraft()) {
-    try { writeForm(JSON.parse(localStorage.getItem(DRAFT_KEY))); showDraftBanner(true); } catch (e) { /* ignore corrupt draft */ }
+  // 老「暂存」键迁进草稿箱（只在新键不存在时发生一次），完事刷一次角标
+  migrateLegacyDraft();
+  refreshDraftBoxUI();
+  // 草稿箱非空 → 自动恢复**最新一份**（和过去「有暂存就回填」同一个习惯）。
+  // restoredDraftId 记下来：这份保存成订单后要把它撤掉。
+  const draftBox = readDraftBox();
+  if (draftBox.length) {
+    try {
+      writeForm(draftBox[0].data);
+      restoredDraftId = draftBox[0].id;
+      showDraftBanner(true);
+    } catch (e) { /* 恢复失败不拦启动：表单留空也能用 */ }
   }
   // PWA 离线缓存：仅在真·安全上下文注册（localhost / https 域名）。
   // APK 内用 WebViewAssetLoader 的 https 虚拟域，资源已内嵌离线，无需 SW，跳过以免 404。

@@ -51,7 +51,7 @@ JAVA_HOME = Path(r'C:\Users\11\.jdks\jbr-21.0.11')
 
 # 上一次已经发出去（并且可能已经装在手机上）的 versionCode。
 # 每发一版就把它改成刚发的那个值：低于它 = 手机上装不上（版本降级）。
-LAST_RELEASED_VERSION_CODE = 30200
+LAST_RELEASED_VERSION_CODE = 30300
 
 results = []
 

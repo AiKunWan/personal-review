@@ -118,6 +118,8 @@ const sandbox = {
   setTimeout, clearTimeout, setInterval, clearInterval,
   Date, Math, JSON, Promise, Error, Number, String, Array, Object, parseFloat, parseInt, isNaN,
   alert: () => {},
+  // onStoreListClick 的编辑分支会调 window.scrollTo(0, 0)，没有它会 TypeError
+  scrollTo: () => {},
   crypto: { randomUUID: () => 'id-' + Math.random().toString(36).slice(2) },
   localStorage: {
     _m: new Map(),
@@ -144,7 +146,7 @@ sandbox.getEl = getEl;
 sandbox.segBtns = segBtns;
 
 const TEST = `
-;(function runTests() {
+;(async function runTests() {
   const out = [];
   // extra 里的换行必须压平：渲染出来的 HTML 片段是带换行的，直接拼进去会让
   // 一条断言占好几行 —— 汇总里的 total 用的是行数，于是「断言数」被虚高的行数
@@ -1761,6 +1763,166 @@ const TEST = `
      segBtns[0].__num.textContent === '0' && optOf('#f-store', 'P店').textContent === 'P店（0）',
      segBtns[0].__num.textContent + ' / ' + optOf('#f-store', 'P店').textContent);
 
+  // ---- v3.3.0：草稿箱（多份草稿 + 管理面板，替代单槽位暂存）----
+  // 老键迁移：只在新键不存在时包一条写入再删老键，失败静默，幂等
+  localStorage.removeItem(DRAFT_BOX_KEY);
+  localStorage.removeItem(DRAFT_LEGACY_KEY);
+  localStorage.setItem(DRAFT_LEGACY_KEY, JSON.stringify({ storeName: '老店', totalPrice: '12', items: '肉夹馍' }));
+  migrateLegacyDraft();
+  ok('老暂存键迁进草稿箱成为一条草稿', readDraftBox().length === 1 && readDraftBox()[0].data.storeName === '老店', 'n=' + readDraftBox().length);
+  ok('迁移后老键被删掉（两份键不长期共存）', localStorage.getItem(DRAFT_LEGACY_KEY) === null);
+  migrateLegacyDraft();
+  ok('迁移幂等：再启动不会重复迁（新键已在）', readDraftBox().length === 1, 'n=' + readDraftBox().length);
+  localStorage.setItem(DRAFT_LEGACY_KEY, JSON.stringify({ storeName: '另一份' }));
+  migrateLegacyDraft();
+  ok('新键已存在时跳过迁移（老键原样留着不崩）', readDraftBox().length === 1 && localStorage.getItem(DRAFT_LEGACY_KEY) !== null, 'n=' + readDraftBox().length);
+  localStorage.removeItem(DRAFT_LEGACY_KEY);
+  localStorage.removeItem(DRAFT_BOX_KEY);
+  localStorage.setItem(DRAFT_LEGACY_KEY, '{坏 JSON');
+  migrateLegacyDraft();
+  ok('老键是坏 JSON 时静默跳过（不写新键、不删老键）', readDraftBox().length === 0 && localStorage.getItem(DRAFT_LEGACY_KEY) === '{坏 JSON');
+
+  // readDraftBox 容错：坏 JSON / 非数组 / 缺 data 一律当没有；排序最新在前
+  localStorage.removeItem(DRAFT_LEGACY_KEY);
+  localStorage.setItem(DRAFT_BOX_KEY, '{坏 JSON');
+  ok('readDraftBox 容错坏 JSON', readDraftBox().length === 0);
+  localStorage.setItem(DRAFT_BOX_KEY, '{"a":1}');
+  ok('readDraftBox 容错非数组', readDraftBox().length === 0);
+  localStorage.setItem(DRAFT_BOX_KEY, JSON.stringify([{ id: 'a', savedAt: 1 }, { id: 'b', savedAt: 2, data: {} }]));
+  ok('readDraftBox 丢掉缺 data 的条目', readDraftBox().length === 1 && readDraftBox()[0].id === 'b', 'n=' + readDraftBox().length);
+  localStorage.setItem(DRAFT_BOX_KEY, JSON.stringify([{ id: 'old', savedAt: 1, data: {} }, { id: 'new', savedAt: 2, data: {} }]));
+  ok('readDraftBox 按 savedAt 降序（最新在前）', readDraftBox()[0].id === 'new', 'first=' + readDraftBox()[0].id);
+
+  // 空表单拒存；暂存是追加不是覆盖
+  localStorage.removeItem(DRAFT_BOX_KEY); // 上面容错测试在箱里留了数据，先清干净
+  resetForm();
+  ok('formIsEmpty：刚 reset 过的空表单算空', formIsEmpty() === true);
+  saveDraft();
+  ok('空表单拒存（一份都不落库）', readDraftBox().length === 0, 'n=' + readDraftBox().length);
+  ok('空表单暂存有提示文案', getEl('.toast').textContent === '表单还是空的，没什么可暂存', getEl('.toast').textContent);
+  getEl('#storeName').value = 'A店';
+  ok('填了店名就不算空表单', formIsEmpty() === false);
+  saveDraft();
+  ok('第一次暂存落一份', readDraftBox().length === 1, 'n=' + readDraftBox().length);
+  getEl('#foodType').value = '快餐';
+  saveDraft();
+  ok('第二次暂存是追加不是覆盖', readDraftBox().length === 2, 'n=' + readDraftBox().length);
+  ok('最新暂存的一份排在最前', readDraftBox()[0].data.foodType === '快餐' && readDraftBox()[1].data.foodType === '', 'first=' + readDraftBox()[0].data.foodType);
+
+  // removeDraftById：存在的删掉；不存在的静默 no-op
+  const boxNow = readDraftBox();
+  ok('removeDraftById 删得掉存在的一份', removeDraftById(boxNow[0].id) === true && readDraftBox().length === 1, 'n=' + readDraftBox().length);
+  ok('removeDraftById 对不存在的 id 静默 no-op', removeDraftById('没有这个id') === false && readDraftBox().length === 1, 'n=' + readDraftBox().length);
+
+  // 配额错误两种提示分支（草稿带 base64 图，超配额是最容易触发的错）
+  const rawSet = localStorage.setItem;
+  let quotaMode = '';
+  localStorage.setItem = function (k, v) {
+    if (k === DRAFT_BOX_KEY && quotaMode) {
+      const err = new Error(quotaMode === 'quota' ? 'QuotaExceededError' : '磁盘坏了');
+      if (quotaMode === 'quota') err.name = 'QuotaExceededError';
+      throw err;
+    }
+    rawSet.call(localStorage, k, v);
+  };
+  getEl('#storeName').value = 'B店';
+  quotaMode = 'quota';
+  saveDraft();
+  ok('配额错误提示去掉图片再试', getEl('.toast').textContent === '暂存失败：本地存储空间不足，去掉图片再试', getEl('.toast').textContent);
+  quotaMode = 'other';
+  saveDraft();
+  ok('其他暂存错误原样带出消息', getEl('.toast').textContent === '暂存失败：磁盘坏了', getEl('.toast').textContent);
+  ok('暂存失败不动箱里已有的草稿', readDraftBox().length === 1, 'n=' + readDraftBox().length);
+  quotaMode = '';
+  localStorage.setItem = rawSet;
+
+  // 角标 / 计数 / footer：每次显式设 hidden，0 份整个收起
+  refreshDraftBoxUI();
+  ok('有草稿时角标显示份数且不收起', getEl('#draft-box-n').textContent === '1' && getEl('#draft-box-n').hidden === false, 'n=' + getEl('#draft-box-n').textContent);
+  localStorage.removeItem(DRAFT_BOX_KEY);
+  refreshDraftBoxUI();
+  ok('0 份时角标显式收起且文字清空', getEl('#draft-box-n').hidden === true && getEl('#draft-box-n').textContent === '', 'hidden=' + getEl('#draft-box-n').hidden);
+  ok('0 份时清空 footer 显式收起', getEl('#draft-box-foot').hidden === true);
+  ok('0 份时列表显示空态文案', getEl('#draft-box-list').innerHTML.indexOf('草稿箱是空的') !== -1);
+
+  // draftItemHtml：标题回落链 / esc / catCls 标色 / 缩略图条件 / 摘要 / 双操作
+  const IMG2 = 'data:image/jpeg;base64,QUJD';
+  const h1 = draftItemHtml({ id: 'x1', savedAt: Date.now(), data: { storeName: 'A店', category: '餐饮', totalPrice: '32', people: '1', items: '汉堡' } });
+  ok('卡片标题用店名', h1.indexOf('A店') !== -1);
+  ok('卡片大类标色走 catCls（餐饮=cat-meal）', h1.indexOf('cat-meal') !== -1);
+  ok('卡片摘要带金额和人数', h1.indexOf('¥32') !== -1 && h1.indexOf('1人') !== -1);
+  ok('没带图不出缩略图', h1.indexOf('draft-thumb') === -1);
+  ok('每张卡两个操作（继续编辑 + 删除）', h1.indexOf('data-draft-edit="x1"') !== -1 && h1.indexOf('data-draft-del="x1"') !== -1);
+  const h2 = draftItemHtml({ id: 'x2', savedAt: Date.now(), data: { foodType: '快餐', category: '零食', totalPrice: '59', people: '1.5', unit: 'jin', dishImage: IMG2 } });
+  ok('没店名标题回落到小类', h2.indexOf('快餐') !== -1 && h2.indexOf('未命名店铺') === -1);
+  ok('重量模式摘要显示斤', h2.indexOf('1.5斤') !== -1);
+  ok('带图才出缩略图（src 进属性）', h2.indexOf('draft-thumb') !== -1 && h2.indexOf(IMG2) !== -1);
+  ok('零食标色 cat-snack', h2.indexOf('cat-snack') !== -1);
+  const h3 = draftItemHtml({ id: 'x3', savedAt: Date.now(), data: {} });
+  ok('店名小类都没有时回落未命名店铺', h3.indexOf('未命名店铺') !== -1);
+  ok('认不出的类回落餐饮色', h3.indexOf('cat-meal') !== -1);
+  const h4 = draftItemHtml({ id: 'x4', savedAt: Date.now(), data: { storeName: '<b>店</b>', items: '<i>菜</i>' } });
+  ok('用户内容过 esc（店名不裸奔进 innerHTML）', h4.indexOf('<b>店</b>') === -1 && h4.indexOf('&lt;b&gt;') !== -1);
+  ok('摘要里的菜品也过 esc', h4.indexOf('<i>菜</i>') === -1 && h4.indexOf('&lt;i&gt;') !== -1);
+
+  // 三种保存时间写法
+  ok('draftSavedAtText 今天显示 今天 HH:mm', draftSavedAtText(Date.now()).indexOf('今天 ') === 0, draftSavedAtText(Date.now()));
+  ok('draftSavedAtText 昨天显示 昨天 HH:mm', draftSavedAtText(Date.now() - DAY).indexOf('昨天 ') === 0, draftSavedAtText(Date.now() - DAY));
+  const oldTs = new Date(2020, 0, 2, 3, 4).getTime();
+  ok('draftSavedAtText 更早显示 MM-DD HH:mm', draftSavedAtText(oldTs) === '01-02 03:04', draftSavedAtText(oldTs));
+
+  // restoredDraftId 清除点 1：resetForm（防误删的关键一笔）
+  restoredDraftId = '假id';
+  resetForm();
+  ok('resetForm 清掉 restoredDraftId', restoredDraftId === null, String(restoredDraftId));
+  ok('resetForm 收起恢复横幅', getEl('#draft-banner').hidden === true);
+
+  // restoredDraftId 清除点 2：编辑旧订单入口（整张表单被换成旧单内容之前）
+  restoredDraftId = '假id2';
+  _lastOrders = [{ id: 'o1', storeName: '老店', city: '哈尔滨', foodType: '小吃', totalPrice: 10, people: 1, unit: 'fen', date: now }];
+  let editPathOk = false;
+  try {
+    onStoreListClick({ target: { closest: function (s) { return s === '[data-edit]' ? { getAttribute: function () { return 'o1'; } } : null; } } });
+    editPathOk = true;
+  } catch (e) { editPathOk = false; }
+  ok('编辑旧订单清掉 restoredDraftId（保存不会误删草稿）', restoredDraftId === null, String(restoredDraftId));
+  ok('编辑旧订单收起恢复横幅', getEl('#draft-banner').hidden === true);
+  ok('编辑旧单入口整条路跑得通（writeForm 不抛）', editPathOk === true);
+
+  // restoredDraftId 清除点 3：保存订单成功后撤草稿（集成：真提交处理器 + 假 db）
+  localStorage.removeItem(DRAFT_BOX_KEY);
+  localStorage.removeItem(DRAFT_LEGACY_KEY);
+  resetForm();
+  getEl('#foodType').value = '快餐';
+  getEl('#items').value = '汉堡';
+  getEl('#totalPrice').value = '30';
+  getEl('#channel-text').value = '仅外卖';
+  getEl('#orderDate').value = dayKey(now);
+  saveDraft();
+  const saveBox = readDraftBox();
+  ok('保存路径前置：箱里正好一份', saveBox.length === 1, 'n=' + saveBox.length);
+  const restoreId = saveBox[0].id;
+  continueDraft(restoreId);
+  ok('continueDraft 记下 restoredDraftId', restoredDraftId === restoreId, String(restoredDraftId));
+  ok('continueDraft 显示恢复横幅', getEl('#draft-banner').hidden === false);
+  ok('恢复后表单值还在（总价 + 消费方式）', getEl('#totalPrice').value === '30' && getEl('#channel-text').value === '仅外卖', getEl('#totalPrice').value);
+  let submitHandler = null;
+  getEl('#order-form').addEventListener = function (type, fn) { if (type === 'submit') submitHandler = fn; };
+  bindForm();
+  ok('bindForm 注册出了提交处理器', typeof submitHandler === 'function', String(typeof submitHandler));
+  db = {
+    transaction: function () {
+      const tx = { objectStore: function () { return { put: function () {}, getAll: function () { return {}; } }; } };
+      setTimeout(function () { if (tx.oncomplete) tx.oncomplete(); }, 0);
+      return tx;
+    }
+  };
+  await submitHandler({ preventDefault: function () {} });
+  ok('保存订单成功后撤掉那份草稿', readDraftBox().length === 0, 'n=' + readDraftBox().length);
+  ok('保存订单后清掉 restoredDraftId', restoredDraftId === null, String(restoredDraftId));
+  ok('保存订单后收起恢复横幅', getEl('#draft-banner').hidden === true);
+  ok('保存成功有提示（写库链路真走通）', getEl('.toast').textContent === '已保存', getEl('.toast').textContent);
+
   globalThis.__RESULT__ = out.join('\\n');
 })();
 `;
@@ -1775,9 +1937,22 @@ try {
   process.exit(1);
 }
 
-const lines = String(sandbox.__RESULT__).split('\n');
-const fails = lines.filter((l) => l.startsWith('FAIL'));
-console.log(lines.join('\n'));
-console.log('');
-console.log('total=' + lines.length + '  pass=' + (lines.length - fails.length) + '  fail=' + fails.length);
-process.exit(fails.length ? 1 : 0);
+// 草稿箱的「保存订单撤草稿」用例要 await 提交处理器，TEST 尾部是异步的 ——
+// 等 __RESULT__ 落盘再统计。同步用例（原有全部）不受影响：它们在同一轮
+// runInContext 里就跑完了，__RESULT__ 早就设上，轮询第一检就过。
+(async () => {
+  const t0 = Date.now();
+  while (!sandbox.__RESULT__ && Date.now() - t0 < 5000) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  if (!sandbox.__RESULT__) {
+    console.log('SMOKE TEST TIMEOUT: async tail never produced results');
+    process.exit(1);
+  }
+  const lines = String(sandbox.__RESULT__).split('\n');
+  const fails = lines.filter((l) => l.startsWith('FAIL'));
+  console.log(lines.join('\n'));
+  console.log('');
+  console.log('total=' + lines.length + '  pass=' + (lines.length - fails.length) + '  fail=' + fails.length);
+  process.exit(fails.length ? 1 : 0);
+})();

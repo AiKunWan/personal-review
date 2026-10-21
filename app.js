@@ -1172,13 +1172,22 @@ function formIsEmpty() {
     !readChannel();
 }
 
+// savedAt 必须**严格递增**：同一毫秒里连点两次「暂存」时 Date.now() 会给出
+// 相同时间戳，而 readDraftBox 和下面都按 savedAt 降序排「最新在前」——
+// 相同时间戳下稳定排序保留 push 顺序（旧在前），刚存的那份就掉到第二位。
+// 真实用户很难点到一毫秒内两次，但排序契约本身不该依赖「两次恰好错开毫秒」。
+// 取 max(Date.now(), 上次+1)：只单调不减，不改任何已有草稿的时间。
+let lastDraftSavedAt = 0;
+
 /** 「暂存」：把当前表单存成**一份新草稿**，不覆盖任何已有草稿。 */
 function saveDraft() {
   if (formIsEmpty()) { toast('表单还是空的，没什么可暂存'); return; }
   const box = readDraftBox();
+  const savedAt = Math.max(Date.now(), lastDraftSavedAt + 1);
+  lastDraftSavedAt = savedAt;
   box.push({
     id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
-    savedAt: Date.now(),
+    savedAt,
     data: readForm(),
   });
   // 最新在前：面板列表和「自动恢复最新一份」都指望这个顺序
@@ -2070,6 +2079,10 @@ function bindForm() {
   // 「重新开始」只丢表单和恢复状态，**不动草稿箱里的数据** —— 那份还在，
   // 随时能从面板里再捞回来（这也是它和旧版「清除暂存」的本质区别）
   $('#draft-restart').addEventListener('click', () => { resetForm(); toast('已重新开始'); });
+  // 「＋ 添加」提示条的「取消」：只撤 banner，**不动表单里已预填的值** ——
+  // 用户反悔的是「别老提醒我」，不是「别用这些值」，接着录完这单完全合理
+  // （和待点评 banner 的取消一个路子）
+  $('#quickadd-banner-cancel').addEventListener('click', () => { showQuickBanner(''); });
   $('#draft-box-close').addEventListener('click', closeDraftBox);
   // 点遮罩关面板，点卡片内容不关（和 lightbox 一个路子）
   $('#draft-box').addEventListener('click', (e) => {
@@ -2207,6 +2220,8 @@ function bindForm() {
     }
     toast((editing ? '已更新' : '已保存') + extra);
     switchView('stores'); // 切回店铺页会触发 refreshAll，不用在这里重复刷一遍
+    // 「＋ 添加」的提示条到这单存完就没用了，撤掉。空串对没显示过的 banner 是 no-op
+    showQuickBanner('');
   });
 }
 
@@ -2749,6 +2764,7 @@ function storeCard(s) {
       ${storeNoteHtml(s)}
       <div class="store-actions">
         <button class="toggle" type="button">${openReviewKeys.has(s.key) ? '收起评价 ▴' : `查看 ${s.count} 条订单评价 ▾`}</button>
+        <button class="store-add" type="button" data-addstore="${esc(s.key)}">＋ 添加</button>
         <button class="store-del" type="button" data-delstore="${esc(s.key)}">删除整店</button>
       </div>
       <div class="reviews${openReviewKeys.has(s.key) ? ' open' : ''}">${reviews}</div>
@@ -2799,6 +2815,7 @@ function foodCard(g) {
       <div class="group-notes">${storeNoteHtml({ key: g.key }, '', 'food')}${g.storeSources.map((st) => storeNoteHtml(st, st.name)).join('')}</div>
       <div class="store-actions">
         <button class="toggle" type="button">${openReviewKeys.has(g.key) ? '收起订单 ▴' : `查看 ${g.count} 笔订单 ▾`}</button>
+        <button class="store-add" type="button" data-addfood="${esc(g.key)}">＋ 添加</button>
         <button class="store-del" type="button" data-delgroup="${esc(g.key)}">删除整组</button>
       </div>
       <div class="reviews${openReviewKeys.has(g.key) ? ' open' : ''}">${reviews}</div>
@@ -3191,6 +3208,21 @@ function onStoreListClick(e) {
     toggle.textContent = open
       ? (isFood ? '收起订单 ▴' : '收起评价 ▴')
       : (isFood ? `查看 ${n} 笔订单 ▾` : `查看 ${n} 条订单评价 ▾`);
+    return;
+  }
+  // ---- 卡片内「＋ 添加」：带着这一组的信息直接去录单 ----
+  // 放在 .toggle 之后、[data-del] 之前：删除那条分支是 closest('[data-del]')，
+  // 我们的按钮不带那个钩子、吃不到它，但顺序上仍要保证任何既有分支都不会先命中。
+  // 注意小类卡**只有** data-delgroup，绝不能出现 data-delstore="food:..." ——
+  // 删除逻辑本次不碰，别碰坏。
+  const addStore = e.target.closest('[data-addstore]');
+  if (addStore) {
+    quickAddFromGroup('store', addStore.getAttribute('data-addstore'));
+    return;
+  }
+  const addFood = e.target.closest('[data-addfood]');
+  if (addFood) {
+    quickAddFromGroup('food', addFood.getAttribute('data-addfood'));
     return;
   }
   const del = e.target.closest('[data-del]');
@@ -3974,6 +4006,25 @@ function showWishBanner(text) {
   }
 }
 
+/**
+ * 订单页卡片里「＋ 添加」带过来的提示条。传空字符串即收起。
+ *
+ * 和 showWishBanner 是两个独立元素（#quickadd-banner / #wish-banner）——
+ * 两条同时出现是真实场景，复用一个会互相顶掉。文字走 textContent，
+ * 店名 / 小类名都是用户自己输的内容，不进 innerHTML。
+ */
+function showQuickBanner(text) {
+  const b = $('#quickadd-banner');
+  if (!b) return;
+  if (text) {
+    const t = $('#quickadd-banner-text');
+    if (t) t.textContent = text;
+    b.hidden = false;
+  } else {
+    b.hidden = true;
+  }
+}
+
 // 「吃过了，去点评」带过来的那条待点评 id，保存订单后凭它精确删除
 let pendingWishId = null;
 
@@ -4010,6 +4061,92 @@ function goReview(id) {
   renderSuggestAll();
   showWishBanner(`「${w.storeName || w.foodType || '这条待点评'}」保存后自动从待点评移除`);
   switchView('add');
+}
+
+/**
+ * 订单页卡片里的「＋ 添加」：带着这一组的信息直接去录单。
+ *
+ * 两种卡片共用这一个入口（钩子见 storeCard / foodCard 的 .store-actions）：
+ *   kind='store' —— 店铺卡：店名预填组键，「未命名店铺」是**组键兜底不是店名**，
+ *     必须留空让用户自己填；大类取该组最近一单；消费方式同样取最近一单
+ *     （这家店最近怎么吃的，这单大概率照旧）。小类不预填。
+ *   kind='food'  —— 小类卡：小类名 = 组键去掉 'food:' 前缀，「小类未填」组
+ *     （空串）留空；店名带出该组最近一单的那家（小类卡横跨多家店，填最近那家
+ *     是概率最高的答案，省一次打字，仍然可改）；大类同样取最近一单。
+ *     小类评价不用在这儿显式填 —— applyFormMode → refreshFoodNote →
+ *     loadFoodNote 会按小类名把那段全局共享的文字读出来填上。
+ *
+ * 「该组」的成员口径与 groupOf / buildGroups **严格一致**（两张卡片本来就是
+ * 按它们渲染的）：店铺组只含餐饮订单，小类组只含非餐饮订单。不过滤的话，
+ * 同一店名跨大类时「最近一单」会取到不属于这张卡的那笔，预填就偏了。
+ *
+ * 赋值顺序严格照 goReview：resetForm 打底 → 店名 → loadSupForStore(true)
+ * → setFormCategory(cat, false) → 小类 → applyFormMode() → renderSuggestAll()。
+ * setFormCategory 第二参 false 是**回填路径**，不清已存值；程序化赋值不触发
+ * change，支持清单必须显式 loadSupForStore(true) 补。
+ *
+ * resetForm 打底是**防误删的关键一笔**：它清掉 restoredDraftId / pendingEditOrder，
+ * 否则拿着别处的表单存这单，保存成功会把草稿箱里那份误删（见 restoredDraftId 注释）。
+ * 这条路径是整个项目最高风险区，别绕开它直接赋值。
+ */
+function quickAddFromGroup(kind, key) {
+  resetForm();
+  // 该组最近一单：大类（两种都有）和店名（小类组）都从它推。按 date 取最新；
+  // 取不到就按「新开一张空白单」处理（餐饮 + 空店名）——正常情况下卡片本来就
+  // 是从这些单子渲染出来的，走不到这个兜底。
+  const latestIn = (list) => {
+    let best = null;
+    for (const o of list) {
+      if (!best || (Number(o.date) || 0) > (Number(best.date) || 0)) best = o;
+    }
+    return best;
+  };
+  let cat = CATEGORY.MEAL;
+  let label = key;
+  let foodName = '';
+  if (kind === 'food') {
+    foodName = key.slice(FOOD_GROUP_PREFIX.length);
+    label = foodName || '小类未填';
+    // 口径与 groupOf 的小类组严格对齐：只有**非餐饮**订单进 'food:' 组。
+    // 带上 kind 判断而不只比键 —— 店名叫 'food:苹果' 这种 pathological 情况下
+    // 餐饮单的组键也会是 'food:苹果'，只比键会把它算进小类组的「最近一单」
+    const latest = latestIn(_lastOrders.filter((o) => {
+      const g = groupOf(o);
+      return g.kind === 'food' && g.key === key;
+    }));
+    if (latest) {
+      cat = catOf(latest);
+      // 带出最近一单的店名；那单也没店名就留空
+      $('#storeName').value = latest.storeName || '';
+    }
+  } else {
+    // 「未命名店铺」是组键兜底、不是店名 —— 留空
+    $('#storeName').value = key === '未命名店铺' ? '' : key;
+    // 口径与 groupOf 的店铺组严格对齐：**只含餐饮订单**。同一店名下的生鲜/零食单
+    // 归各自的小类组、不在这张卡里 —— 不过滤的话，「盒马」3 天前一笔餐饮、
+    // 1 天前一笔生鲜，最近一单会是那笔生鲜，大类被预填成「生鲜」，
+    // 存完落进 'food:' 组而不是用户点的那张店铺卡
+    const latest = latestIn(_lastOrders.filter((o) =>
+      catOf(o) === CATEGORY.MEAL && (orderKeyOf(o) || '未命名店铺') === key));
+    if (latest) {
+      cat = catOf(latest);
+      // 消费方式：这家店最近一笔怎么吃的，这单大概率照旧，带上省一次选择。
+      // 老订单没有 channel 字段就留空（这格必填，让用户自己选，不瞎猜）。
+      // 必须赶在 applyFormMode 之前写 —— 它要按 readChannel() 是不是「线下」
+      // 来决定平台字段的显隐，写在后面平台就收不回去了
+      $('#channel-text').value = latest.channel || '';
+    }
+  }
+  loadSupForStore(true);
+  setFormCategory(cat, false);
+  $('#foodType').value = foodName;
+  // 小类写完之后再定一次形态：上面那次 setFormCategory 跑的时候 foodType 还是空的
+  applyFormMode();
+  renderSuggestAll();
+  showQuickBanner('正在给「' + label + '」添加订单，保存后自动回到订单页');
+  switchView('add');
+  // 和编辑旧单一个路子：切过去把滚动复位，否则用户盯着的是订单页底部
+  window.scrollTo(0, 0);
 }
 
 /** 删一条待点评。先禁掉按钮：存储卡住时用户会连点，那会开出一串写事务。 */

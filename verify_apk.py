@@ -192,7 +192,8 @@ with zipfile.ZipFile(apk) as z:
                        # v3.2.0：订单页筛选条优化。控件排承载状态 + 一键撤销
                        # （#filter-n 计数位 / #filter-clear 清除按钮），以及把低频
                        # 维度收进去的「更多筛选」层（#more-toggle / #filter-more）
-                       'filter-n', 'filter-clear', 'more-toggle', 'filter-more']:
+                       'filter-n', 'filter-clear', 'more-toggle', 'filter-more',
+                       'quickadd-banner', 'quickadd-banner-text', 'quickadd-banner-cancel']:
             check(f'index.html 含 {marker}', marker in html)
     if api:
         for marker in ['groupByDay', 'rankRows', 'dayRows', 'data-stats-days',
@@ -269,7 +270,9 @@ with zipfile.ZipFile(apk) as z:
                        # v3.2.0：订单页筛选条优化。filterCount 数生效条数、
                        # renderFilterBar 统一刷控件排三处状态、resetFilters 是
                        # 「重置筛选 / 清除筛选 / 清除全部」三个入口共用的唯一出口
-                       'filterCount', 'renderFilterBar', 'resetFilters']:
+                       'filterCount', 'renderFilterBar', 'resetFilters',
+                       'quickAddFromGroup', 'showQuickBanner', 'data-addstore',
+                       'data-addfood', 'store-add']:
             check(f'app.js 含功能标记 {marker}', marker in api)
 
         # 反向断言：预置词条必须**不在**包里（v2.9 起「小类」只用历史值）。

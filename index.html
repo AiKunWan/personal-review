@@ -11,7 +11,7 @@
 <body>
   <header class="topbar">
     <h1>个人点评</h1>
-    <span class="ver">v3.3.0</span>
+    <span class="ver">v3.4.0</span>
   </header>
 
   <main>
@@ -37,6 +37,16 @@
       <div id="wish-banner" class="banner" hidden>
         <span id="wish-banner-text"></span>
         <button type="button" id="wish-banner-cancel" class="link">取消</button>
+      </div>
+      <!-- 订单页卡片里「＋ 添加」带过来的提示条：告诉用户正在给哪个店 / 哪个小类
+           补一单，保存后自动回到订单页。右边给一个「取消」（中途反悔 —— 只撤
+           这条 banner，表单里已经预填的值不动，照常当一张新单录）。
+           和上面两条一样是**独立元素**：三条同时出现是真实场景（先从草稿箱恢复了
+           一份，又从待点评转过来一单，再点了一下卡片上的「＋ 添加」），
+           复用一个会互相顶掉。 -->
+      <div id="quickadd-banner" class="banner" hidden>
+        <span id="quickadd-banner-text"></span>
+        <button type="button" id="quickadd-banner-cancel" class="link">取消</button>
       </div>
       <form id="order-form" class="card">
         <!-- 购买日期 ｜ 地点：放在最前，都是「这单发生在什么时候、在哪」。

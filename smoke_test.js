@@ -675,6 +675,170 @@ const TEST = `
        groupCard(B).indexOf('data-delstore') !== -1);
   } catch (e) { ok('foodCard renders', false, e && e.message); }
 
+  // ---- 卡片内「＋ 添加」（quickAddFromGroup） ----
+  // 订单页的店铺卡 / 小类卡里直接录单：两种卡片的 .store-actions 行各加一个按钮，
+  // 点了带着这一组的信息切到「添加」页。钩子必须各自挂在对应模板里，
+  // 且小类卡仍然只有 data-delgroup（删除逻辑不碰，别碰坏）。
+  ok('店铺卡的 .store-actions 带「＋ 添加」钩子',
+     storeCard(B).indexOf('data-addstore=') !== -1);
+  ok('店铺卡的添加按钮用 store-add 类（和 store-del 视觉平级）',
+     storeCard(B).indexOf('class="store-add"') !== -1);
+  ok('店铺卡不带小类组的添加钩子', storeCard(B).indexOf('data-addfood') === -1);
+  ok('小类卡的 .store-actions 带「＋ 添加」钩子（键带 food: 前缀）',
+     foodCard(appleG).indexOf('data-addfood="food:苹果"') !== -1);
+  ok('小类卡的添加按钮同样用 store-add 类',
+     foodCard(appleG).indexOf('class="store-add"') !== -1);
+  ok('小类卡仍然只有 data-delgroup，没有 data-delstore',
+     foodCard(appleG).indexOf('data-delstore') === -1 &&
+     foodCard(appleG).indexOf('data-delgroup="food:苹果"') !== -1);
+  ok('添加按钮进的是 .store-actions 行（不是游离在卡片外）',
+     storeCard(B).indexOf('<div class="store-actions">') < storeCard(B).indexOf('data-addstore'));
+
+  // banner 显隐：文字走 textContent（用户内容不进 innerHTML），空串收起
+  showQuickBanner('测试文案');
+  ok('showQuickBanner 显示并写入文字',
+     getEl('#quickadd-banner').hidden === false && getEl('#quickadd-banner-text').textContent === '测试文案',
+     getEl('#quickadd-banner-text').textContent);
+  showQuickBanner('');
+  ok('showQuickBanner 传空串收起', getEl('#quickadd-banner').hidden === true);
+  showWishBanner('待点评文案');
+  showQuickBanner('快捷文案');
+  ok('两条 banner 互不顶掉（独立元素）',
+     getEl('#wish-banner').hidden === false && getEl('#quickadd-banner').hidden === false);
+  showWishBanner('');
+  showQuickBanner('');
+
+  // 预填数据：四种组各来一份 —— 未命名店铺 / 具名餐饮店 / 跨店小类 / 小类未填。
+  // 每组都故意放两单不同日期：大类必须取**最近**那一单
+  const qaOrders = [
+    { id: 'q1', storeKey: '', storeName: '', city: '哈尔滨', category: '餐饮', foodType: '快餐', channel: '仅外卖', platform: '美团', items: '盖饭', totalPrice: 20, people: 1, unit: 'fen', rating: 4, review: '', dishImage: null, date: now - 5 * DAY },
+    { id: 'q2', storeKey: '', storeName: '', city: '哈尔滨', category: '餐饮', foodType: '面条', channel: '仅外卖', platform: '美团', items: '拉面', totalPrice: 18, people: 1, unit: 'fen', rating: 5, review: '', dishImage: null, date: now - DAY },
+    { id: 'q3', storeKey: '盒马', storeName: '盒马', city: '哈尔滨', category: '生鲜', foodType: '苹果', channel: '到店', platform: '盒马', items: '苹果', totalPrice: 20, people: 2, unit: 'jin', rating: 4, review: '', dishImage: null, date: now - 10 * DAY },
+    { id: 'q4', storeKey: '果园', storeName: '果园', city: '哈尔滨', category: '生鲜', foodType: '苹果', channel: '自提', platform: '', items: '苹果', totalPrice: 30, people: 2.5, unit: 'jin', rating: 5, review: '', dishImage: null, date: now - 2 * DAY },
+    { id: 'q5', storeKey: '菜市场', storeName: '菜市场', city: '哈尔滨', category: '零食', foodType: '', channel: '到店', platform: '', items: '瓜子', totalPrice: 12, people: 0.5, unit: 'jin', rating: 3, review: '', dishImage: null, date: now - 3 * DAY },
+    { id: 'q6', storeKey: '烧烤店', storeName: '烧烤店', city: '哈尔滨', category: '餐饮', foodType: '烧烤', channel: '仅外卖', platform: '美团', items: '羊肉串', totalPrice: 66, people: 2, unit: 'fen', rating: 5, review: '', dishImage: null, date: now - 4 * DAY },
+    // 盒马同时有餐饮单（更旧）和生鲜单（更新）—— 订单页「盒马」店铺卡的组
+    // **只含餐饮订单**（groupOf：餐饮按店铺、生鲜零食按小类），所以从店铺卡
+    // 点添加，大类必须取那笔餐饮单，不能被更新的生鲜单带偏
+    { id: 'q7', storeKey: '盒马', storeName: '盒马', city: '哈尔滨', category: '餐饮', foodType: '快餐', channel: '仅外卖', platform: '美团', items: '盒饭', totalPrice: 25, people: 1, unit: 'fen', rating: 4, review: '', dishImage: null, date: now - 12 * DAY },
+    // 烧烤店第二笔、日期更新、渠道不同 —— 消费方式必须取**最近**这笔（堂食），
+    // 而不是更早那笔的仅外卖
+    { id: 'q8', storeKey: '烧烤店', storeName: '烧烤店', city: '哈尔滨', category: '餐饮', foodType: '烧烤', channel: '堂食', platform: '', items: '羊肉串x10', totalPrice: 88, people: 2, unit: 'fen', rating: 5, review: '', dishImage: null, date: now - DAY },
+    // 老订单：**没有 channel 字段**（v2.x 之前不记这个）→ 消费方式必须留空
+    { id: 'q9', storeKey: '面馆', storeName: '面馆', city: '哈尔滨', category: '餐饮', foodType: '面条', platform: '', items: '拉面', totalPrice: 15, people: 1, unit: 'fen', rating: 4, review: '', dishImage: null, date: now - 2 * DAY }
+  ];
+  _lastOrders = qaOrders;
+
+  // ① 未命名店铺组：组键是兜底不是店名 → 店名必须留空
+  quickAddFromGroup('store', '未命名店铺');
+  ok('未命名店铺组：店名留空（组键兜底不是真实店名）',
+     getEl('#storeName').value === '', JSON.stringify(getEl('#storeName').value));
+  ok('未命名店铺组：大类取该组最近一单', formCategory === '餐饮', formCategory);
+  ok('未命名店铺组：小类不预填（店铺卡只带店名和大类）', getEl('#foodType').value === '');
+  ok('未命名店铺组：banner 显示并点名这一组',
+     getEl('#quickadd-banner').hidden === false &&
+     getEl('#quickadd-banner-text').textContent.indexOf('未命名店铺') !== -1,
+     getEl('#quickadd-banner-text').textContent);
+
+  // ② 具名店铺组：店名预填组键
+  quickAddFromGroup('store', '烧烤店');
+  ok('具名店铺组：店名预填成组键', getEl('#storeName').value === '烧烤店', getEl('#storeName').value);
+  ok('具名店铺组：大类推导正确', formCategory === '餐饮', formCategory);
+  ok('具名店铺组：banner 文案带店名',
+     getEl('#quickadd-banner-text').textContent.indexOf('烧烤店') !== -1);
+
+  // ②b 同一店名跨大类（QA 回归抓到的预填偏差）：盒马 12 天前一笔餐饮、
+  // 10 天前一笔生鲜 —— 订单页「盒马」店铺卡的组**只含餐饮订单**，
+  // 大类必须取那笔餐饮单，不被更新的生鲜单带偏（带偏了存完会落进
+  // 'food:' 组，而不是用户点的那张店铺卡）
+  quickAddFromGroup('store', '盒马');
+  ok('跨大类同店名：店铺卡添加的大类取餐饮单（不被更新的生鲜单带偏）',
+     formCategory === '餐饮', formCategory);
+  ok('跨大类同店名：店铺卡添加的店名照常预填',
+     getEl('#storeName').value === '盒马', getEl('#storeName').value);
+  // 小类卡那侧不受影响：苹果组只认非餐饮单，仍取最近一笔（果园那笔）
+  quickAddFromGroup('food', 'food:苹果');
+  ok('跨大类同店名：小类卡添加不受影响（仍取生鲜 + 最近店名果园）',
+     formCategory === '生鲜' && getEl('#foodType').value === '苹果' && getEl('#storeName').value === '果园',
+     formCategory + '/' + getEl('#foodType').value + '/' + getEl('#storeName').value);
+
+  // ②c 消费方式预填：店铺卡要把该组最近一单的 channel 带进 #channel-text。
+  // 取的是**最近**那笔（q8 一天前的堂食，不是 q6 四天前的仅外卖）；
+  // 赋值在 applyFormMode 之前，平台字段该显示还显示
+  quickAddFromGroup('store', '烧烤店');
+  ok('店铺卡：消费方式预填该组最近一单（堂食，不是更早的仅外卖）',
+     getEl('#channel-text').value === '堂食', getEl('#channel-text').value);
+  ok('店铺卡：消费方式预填后平台字段照常显示（堂食不是线下）',
+     getEl('#platform-field').hidden === false);
+  quickAddFromGroup('store', '面馆');
+  ok('店铺卡：老订单没有 channel 字段 → 消费方式留空（不瞎猜）',
+     getEl('#channel-text').value === '', JSON.stringify(getEl('#channel-text').value));
+
+  // 小类评价预填：小类卡那格不用显式赋值 —— applyFormMode → refreshFoodNote →
+  // loadFoodNote 按小类名读 storeMeta 填上（这段文字按小类名全局共享）
+  const metaBackup = Object.keys(storeMeta).map((k) => storeMeta[k]);
+  indexMeta([{ storeKey: 'food:苹果', note: '红富士稳定，奶油富士偏贵但更甜。' }]);
+  quickAddFromGroup('food', 'food:苹果');
+  ok('小类卡：小类评价按小类名带出（全局共享的那段文字）',
+     getEl('#food-note').value === '红富士稳定，奶油富士偏贵但更甜。',
+     getEl('#food-note').value);
+  ok('小类卡：小类评价格随小类显示出来', getEl('#food-note-field').hidden === false);
+  quickAddFromGroup('food', 'food:');
+  ok('小类未填组：评价那格收起（没有小类就谈不上评价谁）',
+     getEl('#food-note-field').hidden === true);
+  indexMeta(metaBackup);
+
+  // ③ 跨店小类组：小类名 = 组键去前缀；店名带出**最近**一单的那家
+  quickAddFromGroup('food', 'food:苹果');
+  ok('小类组：小类名按组键去前缀预填', getEl('#foodType').value === '苹果', getEl('#foodType').value);
+  ok('小类组：大类取该组最近一单（生鲜）', formCategory === '生鲜', formCategory);
+  ok('小类组：店名带出最近一单的那家（果园，不是盒马）',
+     getEl('#storeName').value === '果园', getEl('#storeName').value);
+  ok('小类组：banner 文案带小类名',
+     getEl('#quickadd-banner-text').textContent.indexOf('苹果') !== -1);
+
+  // ④ 小类未填组（food: 空串）：小类留空，店名照常带出
+  quickAddFromGroup('food', 'food:');
+  ok('小类未填组：小类留空（兜底键不是真实小类）',
+     getEl('#foodType').value === '', JSON.stringify(getEl('#foodType').value));
+  ok('小类未填组：大类取该组最近一单（零食）', formCategory === '零食', formCategory);
+  ok('小类未填组：店名照常带出', getEl('#storeName').value === '菜市场', getEl('#storeName').value);
+  ok('小类未填组：banner 文案显示「小类未填」而不是空引号',
+     getEl('#quickadd-banner-text').textContent.indexOf('小类未填') !== -1,
+     getEl('#quickadd-banner-text').textContent);
+
+  // resetForm 打底是防误删的关键一笔：restoredDraftId 必须被清掉
+  restoredDraftId = '假id-quickadd';
+  quickAddFromGroup('store', '烧烤店');
+  ok('快速添加清掉 restoredDraftId（保存不会误删草稿）', restoredDraftId === null, String(restoredDraftId));
+
+  // 「取消」只撤 banner，表单里预填的值不动
+  showQuickBanner('x');
+  showQuickBanner('');
+  ok('取消后表单预填值原样留着',
+     getEl('#storeName').value === '烧烤店' && getEl('#foodType').value === '',
+     getEl('#storeName').value);
+
+  // 事件委托：两个新分支都接在 onStoreListClick 上，且不被 .toggle / [data-del] 吃掉
+  onStoreListClick({ target: { closest: function (s) {
+    if (s === '[data-addstore]') return { getAttribute: function () { return '烧烤店'; } };
+    return null;
+  } } });
+  ok('onStoreListClick 把 data-addstore 分到店铺预填',
+     getEl('#storeName').value === '烧烤店' && getEl('#quickadd-banner').hidden === false,
+     getEl('#storeName').value);
+  onStoreListClick({ target: { closest: function (s) {
+    if (s === '[data-addfood]') return { getAttribute: function () { return 'food:苹果'; } };
+    return null;
+  } } });
+  ok('onStoreListClick 把 data-addfood 分到小类预填',
+     getEl('#foodType').value === '苹果' && getEl('#storeName').value === '果园',
+     getEl('#foodType').value + '/' + getEl('#storeName').value);
+
+  // 收尾：把全局状态还回去，后面的用例各自会重建
+  _lastOrders = [];
+  resetForm();
+
   // ---- v2.4：页内历史标签（替代原生 datalist）+ 可改的下单日期 ----
   // 历史值按使用次数排序，不按拼音：常用的排前面才有意义
   const hist = historyOf([{ city: '哈尔滨' }, { city: '哈尔滨' }, { city: '秦皇岛' }], 'city');
@@ -1922,6 +2086,20 @@ const TEST = `
   ok('保存订单后清掉 restoredDraftId', restoredDraftId === null, String(restoredDraftId));
   ok('保存订单后收起恢复横幅', getEl('#draft-banner').hidden === true);
   ok('保存成功有提示（写库链路真走通）', getEl('.toast').textContent === '已保存', getEl('.toast').textContent);
+
+  // 「＋ 添加」录完一单：banner 跟着保存成功一起撤掉。
+  // 复用上面抓到的提交处理器和假 db（同一套路：真链路 + 假存储）
+  getEl('#storeName').value = '烧烤店';
+  getEl('#foodType').value = '烧烤';
+  getEl('#items').value = '羊肉串';
+  getEl('#totalPrice').value = '66';
+  getEl('#channel-text').value = '仅外卖';
+  getEl('#orderDate').value = dayKey(now);
+  showQuickBanner('正在给「烧烤店」添加订单，保存后自动回到订单页');
+  ok('提交前「＋ 添加」banner 还在', getEl('#quickadd-banner').hidden === false);
+  await submitHandler({ preventDefault: function () {} });
+  ok('保存成功后撤掉「＋ 添加」banner', getEl('#quickadd-banner').hidden === true);
+  ok('保存成功有提示（第二单）', getEl('.toast').textContent === '已保存', getEl('.toast').textContent);
 
   globalThis.__RESULT__ = out.join('\\n');
 })();

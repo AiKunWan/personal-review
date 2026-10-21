@@ -887,6 +887,20 @@ input[type="range"] { width: 100%; accent-color: var(--green); }
   font-size: 13px;
   flex-shrink: 0;
 }
+/* 「＋ 添加」：和 .store-del 同一套字形（描边胶囊、13px），只换色系 ——
+   走现有的线条 / 主题绿，不新造颜色。margin-left:auto 把「添加 + 删除」推到一起
+   贴在右侧：.store-actions 是 space-between，三个按钮会被均摊成
+   「左 / 中 / 右」，添加和删除是一组动作，不该被拆开。 */
+.store-add {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--green-d);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
 
 /* ---------- 统计页 ---------- */
 .stat-grid {
